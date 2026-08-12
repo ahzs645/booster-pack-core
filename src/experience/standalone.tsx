@@ -37,7 +37,9 @@ if (!container) throw new Error("Pack opening root element is missing");
 const root = createRoot(container);
 root.render(
   <PackOpening
-    assetBase="tcger-pack://bundle"
+    // The iOS scheme handler proxies this host to the same R2 manifest used by
+    // the website and falls back to PackOpening.bundle when offline.
+    assetBase="tcger-pack://assets"
     embedded
     onEvent={emit}
   />,
