@@ -35,7 +35,9 @@ function once<T>(url: string, load: (url: string) => Promise<T>): Promise<T> {
 
 async function json<T>(url: string): Promise<T> {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url} → ${r.status} ${r.statusText}`);
+  // WKURLSchemeHandler-backed fetches are valid but WebKit exposes them with
+  // status 0 because they have no HTTP status line.
+  if (!r.ok && r.status !== 0) throw new Error(`${url} → ${r.status} ${r.statusText}`);
   return r.json() as Promise<T>;
 }
 
@@ -66,7 +68,7 @@ export function loadManifest({ base = '', path = MANIFEST_PATH } = {}) {
 export const loadGeometry = (url: string): Promise<THREE.BufferGeometry> =>
   once(`geo:${url}`, async () => {
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`${url} → ${r.status} ${r.statusText}`);
+    if (!r.ok && r.status !== 0) throw new Error(`${url} → ${r.status} ${r.statusText}`);
     return parseObj(await r.text());
   });
 
@@ -74,6 +76,6 @@ export const loadGeometry = (url: string): Promise<THREE.BufferGeometry> =>
 export const loadMeshSource = (url: string): Promise<string> =>
   once(`obj:${url}`, async () => {
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`${url} → ${r.status} ${r.statusText}`);
+    if (!r.ok && r.status !== 0) throw new Error(`${url} → ${r.status} ${r.statusText}`);
     return r.text();
   });
