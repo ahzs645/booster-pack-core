@@ -7,7 +7,7 @@ import {
   type ThreeEvent,
 } from "@react-three/fiber";
 import { splitGeometryByCut, type CutFn, type SplitMesh } from "../index";
-import { use, useEffect, useMemo, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
@@ -24,6 +24,8 @@ export type { PackOpeningPhase as PackPhase } from "./types";
 
 export interface PackSceneControls {
   timeScale: number;
+  reducedMotion: boolean;
+  revealNext?: () => void;
 }
 
 interface PackExperienceProps {
@@ -416,6 +418,7 @@ interface PackCarouselProps {
    * arrives here; without one the variant is painted into a sheet instead.
    */
   sheet?: THREE.Texture | null;
+  reducedMotion?: boolean;
   onSelect: () => void;
 }
 
@@ -430,7 +433,13 @@ const TWO_PI = Math.PI * 2;
  * around (the rotation you leave it at is kept), tap a side pack to focus it,
  * tap the focused pack to open that one.
  */
-export function PackCarousel({ assetBase = "", variant, sheet, onSelect }: PackCarouselProps) {
+export function PackCarousel({
+  assetBase = "",
+  variant,
+  sheet,
+  reducedMotion = false,
+  onSelect,
+}: PackCarouselProps) {
   const [hovered, setHovered] = useState(false);
   // The ring is sized to the frame it is rendered in: on a phone-shaped canvas
   // the full radius pushes the neighbouring packs past both edges, so shrink it
@@ -520,26 +529,39 @@ export function PackCarousel({ assetBase = "", variant, sheet, onSelect }: PackC
 
     // ring physics: momentum → snap to the nearest slot (or an explicit goto)
     if (!st.drag || st.drag.mode !== "ring") {
-      st.angle += st.vel * dt;
-      st.vel = THREE.MathUtils.damp(st.vel, 0, 3, dt);
-      if (st.goto !== null) {
-        st.angle = THREE.MathUtils.damp(st.angle, st.goto, 6, dt);
-        if (Math.abs(st.angle - st.goto) < 0.005) st.goto = null;
-      } else if (Math.abs(st.vel) < 0.4) {
-        const nearest = Math.round(st.angle / CAROUSEL_STEP) * CAROUSEL_STEP;
-        st.angle = THREE.MathUtils.damp(st.angle, nearest, 4, dt);
+      if (reducedMotion) {
+        if (st.goto !== null) {
+          st.angle = st.goto;
+          st.goto = null;
+        } else {
+          st.angle =
+            Math.round(st.angle / CAROUSEL_STEP) * CAROUSEL_STEP;
+        }
+        st.vel = 0;
+      } else {
+        st.angle += st.vel * dt;
+        st.vel = THREE.MathUtils.damp(st.vel, 0, 3, dt);
+        if (st.goto !== null) {
+          st.angle = THREE.MathUtils.damp(st.angle, st.goto, 6, dt);
+          if (Math.abs(st.angle - st.goto) < 0.005) st.goto = null;
+        } else if (Math.abs(st.vel) < 0.4) {
+          const nearest = Math.round(st.angle / CAROUSEL_STEP) * CAROUSEL_STEP;
+          st.angle = THREE.MathUtils.damp(st.angle, nearest, 4, dt);
+        }
       }
     }
 
-    textures.sheen.uniforms.uTime.value = t;
+    textures.sheen.uniforms.uTime.value = reducedMotion ? 0 : t;
 
     for (let i = 0; i < CAROUSEL_COPIES; i++) {
       // per-pack free spin with inertia — the rotation you leave it at is
       // kept, no snap-back
       const draggingThis = st.drag?.mode === "pack" && st.drag.idx === i;
-      if (!draggingThis) {
+      if (!draggingThis && !reducedMotion) {
         st.spin[i] += st.spinVel[i] * dt;
         st.spinVel[i] = THREE.MathUtils.damp(st.spinVel[i], 0, 1.6, dt);
+      } else if (reducedMotion) {
+        st.spinVel[i] = 0;
       }
 
       const group = groupRefs.current[i];
@@ -547,7 +569,7 @@ export function PackCarousel({ assetBase = "", variant, sheet, onSelect }: PackC
       const a = st.angle + i * CAROUSEL_STEP;
       group.position.set(
         Math.sin(a) * radius,
-        Math.sin(t * 1.2 + i * 1.1) * 0.05,
+        reducedMotion ? 0 : Math.sin(t * 1.2 + i * 1.1) * 0.05,
         -radius + Math.cos(a) * radius,
       );
       group.rotation.y = a * 0.55 + st.spin[i];
@@ -816,25 +838,40 @@ export function PackExperience({
     }
   };
 
-  const handleStackClick = (e: ThreeEvent<PointerEvent>) => {
+  const revealNext = useCallback(() => {
     if (phase !== "reveal") return;
-    e.stopPropagation();
     const a = anim.current;
     const idx = a.topIndex;
     if (idx >= cards.length) return;
     const isBig = tierRank(cards[idx].tier) >= 3;
     if (isBig && !a.charge.done) {
-      a.charge.done = true; // skip the buildup
-      onFlash();
-      return;
+      a.charge.done = true;
+      if (!controls.current.reducedMotion) {
+        onFlash();
+      }
     }
     a.dismiss.set(idx, { t: 0, dir: idx % 2 === 0 ? 1 : -1 });
     a.topIndex = idx + 1;
     a.charge = { t: 0, done: false };
     if (a.topIndex < cards.length) onReveal(a.topIndex + 1);
+  }, [cards, controls, onFlash, onReveal, phase]);
+
+  useEffect(() => {
+    controls.current.revealNext = revealNext;
+    return () => {
+      if (controls.current.revealNext === revealNext) {
+        controls.current.revealNext = undefined;
+      }
+    };
+  }, [controls, revealNext]);
+
+  const handleStackClick = (e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation();
+    revealNext();
   };
 
   useFrame((state, rawDelta) => {
+    const reducedMotion = controls.current.reducedMotion;
     const ts = controls.current.timeScale;
     const dt = Math.min(rawDelta, 0.05) * ts;
     const t = state.clock.elapsedTime;
@@ -855,7 +892,7 @@ export function PackExperience({
     }
 
     // glowing cut edge, pulsing like the reference
-    const glowPulse = 0.55 + Math.sin(t * 9) * 0.25;
+    const glowPulse = reducedMotion ? 0.7 : 0.55 + Math.sin(t * 9) * 0.25;
     if (edgeBodyMatRef.current) {
       edgeBodyMatRef.current.opacity = cutGeos
         ? glowPulse * (wrapperMaterials.current[0]?.opacity ?? 1)
@@ -881,7 +918,7 @@ export function PackExperience({
           );
           pack.rotation.y = THREE.MathUtils.damp(pack.rotation.y, 0, 10, dt);
           pack.rotation.x = THREE.MathUtils.damp(pack.rotation.x, 0, 10, dt);
-        } else {
+        } else if (!reducedMotion) {
           // bulk stacks barely tilt — seen edge-on, the pitched slats splay
           // into a fanned mess (reference app locks its stack down too)
           const tiltY = stackCount > 1 ? 0.06 : 0.35;
@@ -899,6 +936,10 @@ export function PackExperience({
             4,
             dt,
           );
+        } else {
+          pack.position.y = packBaseY;
+          pack.rotation.y = THREE.MathUtils.damp(pack.rotation.y, 0, 10, dt);
+          pack.rotation.x = THREE.MathUtils.damp(pack.rotation.x, 0, 10, dt);
         }
       }
     }
@@ -951,7 +992,9 @@ export function PackExperience({
     // --- opening timeline ----------------------------------------------------
     if (phase === "opening") {
       const duration = 1.7 + (stackCount - 1) * 0.12;
-      a.openT = Math.min(1, a.openT + dt / duration);
+      a.openT = reducedMotion
+        ? 1
+        : Math.min(1, a.openT + dt / duration);
       const T = a.openT * (duration / 1.7); // in single-pack time units
 
       if (packRef.current) {
@@ -1014,7 +1057,9 @@ export function PackExperience({
       const isBig = top ? tierRank(top.tier) >= 3 : false;
 
       // charge-up before big reveals
-      if (top && isBig && !a.charge.done) {
+      if (top && isBig && !a.charge.done && reducedMotion) {
+        a.charge.done = true;
+      } else if (top && isBig && !a.charge.done) {
         a.charge.t += dt / 1.4;
         if (a.charge.t >= 1) {
           a.charge.done = true;
@@ -1038,16 +1083,17 @@ export function PackExperience({
 
       // stack tilt toward pointer
       if (stackRef.current) {
-        const shake = charging ? Math.sin(t * 55) * 0.02 * a.charge.t : 0;
+        const shake =
+          charging && !reducedMotion ? Math.sin(t * 55) * 0.02 * a.charge.t : 0;
         stackRef.current.rotation.y = THREE.MathUtils.damp(
           stackRef.current.rotation.y,
-          pointer.x * 0.4,
+          reducedMotion ? 0 : pointer.x * 0.4,
           5,
           dt,
         );
         stackRef.current.rotation.x = THREE.MathUtils.damp(
           stackRef.current.rotation.x,
-          -pointer.y * 0.25,
+          reducedMotion ? 0 : -pointer.y * 0.25,
           5,
           dt,
         );
@@ -1058,7 +1104,7 @@ export function PackExperience({
       for (const [cardIdx, d] of a.dismiss) {
         const group = cardRefs.current[cardIdx];
         if (!group) continue;
-        d.t = Math.min(1, d.t + dt / 0.45);
+        d.t = reducedMotion ? 1 : Math.min(1, d.t + dt / 0.45);
         const e = easeInCubic(d.t);
         group.position.x = d.dir * e * 5.5;
         group.position.y = e * 1.4;
@@ -1085,10 +1131,13 @@ export function PackExperience({
 
     // --- holo + sheen shader uniforms ---------------------------------------
     for (const mat of holoMaterials) {
-      mat.uniforms.uTime.value = t;
-      mat.uniforms.uTilt.value.set(pointer.x, pointer.y);
+      mat.uniforms.uTime.value = reducedMotion ? 0 : t;
+      mat.uniforms.uTilt.value.set(
+        reducedMotion ? 0 : pointer.x,
+        reducedMotion ? 0 : pointer.y,
+      );
     }
-    sheenMat.uniforms.uTime.value = t;
+    sheenMat.uniforms.uTime.value = reducedMotion ? 0 : t;
     sheenMat.uniforms.uOpacity.value = wrapperMaterials.current[0]?.opacity ?? 1;
   });
 

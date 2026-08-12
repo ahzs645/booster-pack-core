@@ -37,10 +37,24 @@ import type { PackOpeningProps } from "./types";
 const PHASE_HINTS: Partial<Record<PackPhase, string>> = {
   select: "Swipe or drag to browse · spin a pack or use the button to open",
   tear: "Swipe across the dotted line to tear the pack open",
-  reveal: "Tap the stack to reveal the next card",
+  reveal: "Reveal cards one at a time or show all pulls",
 };
 
 const PACK_COUNTS = [1, 5, 10] as const;
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  return reduced;
+}
 
 /**
  * The HUD is a development aid, not part of the demo: it renders under
@@ -86,11 +100,23 @@ export function PackOpening({
   const [forceChase, setForceChase] = useState(false);
   const [slowMo, setSlowMo] = useState(false);
   const showHud = useDebugHud(debug);
-  const controls = useRef<PackSceneControls>({ timeScale: 1 });
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const controls = useRef<PackSceneControls>({
+    timeScale: 1,
+    reducedMotion: false,
+  });
+  const experienceRef = useRef<HTMLDivElement>(null);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const previousPhaseRef = useRef<PackPhase | null>(null);
 
   useEffect(() => {
     controls.current.timeScale = slowMo ? 0.25 : 1;
   }, [slowMo]);
+
+  useEffect(() => {
+    controls.current.reducedMotion = prefersReducedMotion;
+  }, [prefersReducedMotion]);
 
   const startPacks = useCallback(
     (skin: PackSkin) => {
@@ -192,6 +218,28 @@ export function PackOpening({
     onEvent?.({ type: "phaseChanged", phase });
   }, [onEvent, phase]);
 
+  useEffect(() => {
+    const previousPhase = previousPhaseRef.current;
+    previousPhaseRef.current = phase;
+    if (previousPhase === null || previousPhase === phase) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const focusTarget =
+        phase === "summary" || phase === "final"
+          ? resultsHeadingRef.current
+          : primaryActionRef.current;
+      const target = focusTarget ?? experienceRef.current;
+      target?.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "center",
+      });
+      target?.focus({
+        preventScroll: true,
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase, prefersReducedMotion]);
+
   const skins = useMemo(
     () => [...VARIANT_SKINS, ...coverSkins(manifest), ...uploads],
     [manifest, uploads],
@@ -231,6 +279,27 @@ export function PackOpening({
 
   return (
     <div
+      ref={experienceRef}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const target = event.target as HTMLElement;
+        if (
+          target.closest(
+            "button, a, input, select, textarea, [role='button'], [contenteditable='true']",
+          )
+        ) {
+          return;
+        }
+        if (phase === "tear") {
+          event.preventDefault();
+          handleTorn();
+        } else if (phase === "reveal") {
+          event.preventDefault();
+          controls.current.revealNext?.();
+        }
+      }}
+      aria-label="Pack opening experience"
       className={cn(
         "relative isolate w-full overflow-hidden bg-gradient-to-b from-muted/40 via-background to-primary/5",
         embedded
@@ -255,6 +324,7 @@ export function PackOpening({
                 assetBase={assetBase}
                 variant={skinVariant(browseSkin)}
                 sheet={browseSheet}
+                reducedMotion={prefersReducedMotion}
                 onSelect={() => startPacks(browseSkin)}
               />
             ) : currentPack && variant ? (
@@ -314,8 +384,12 @@ export function PackOpening({
       {PHASE_HINTS[phase] && (
         <p
           className={cn(
-            "pointer-events-none absolute inset-x-4 text-center text-xs font-medium text-muted-foreground sm:text-sm",
-            phase === "select" ? "bottom-64 sm:bottom-56" : "bottom-3",
+            "pointer-events-none absolute left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-border bg-background/85 px-3 py-1.5 text-center text-xs font-medium text-muted-foreground shadow-sm backdrop-blur sm:text-sm",
+            phase === "select"
+              ? "bottom-64 sm:bottom-56"
+              : phase === "tear" || phase === "reveal"
+                ? "bottom-24"
+                : "bottom-3",
           )}
         >
           {phase === "tear" && packs.length > 1
@@ -325,14 +399,42 @@ export function PackOpening({
       )}
 
       {(phase === "tear" || phase === "reveal") && (
-        <div className="absolute inset-x-4 bottom-10 z-10 flex justify-center">
+        <div className="absolute inset-x-3 bottom-5 z-10 flex flex-wrap justify-center gap-2">
           <button
+            ref={primaryActionRef}
             type="button"
-            onClick={phase === "tear" ? handleTorn : handleAllRevealed}
-            className="min-h-11 rounded-full border border-border bg-background/90 px-5 py-2.5 text-sm font-semibold shadow-sm backdrop-blur transition hover:bg-muted"
+            onClick={
+              phase === "tear"
+                ? handleTorn
+                : () => controls.current.revealNext?.()
+            }
+            aria-label={
+              phase === "reveal"
+                ? currentPack && revealedCount >= currentPack.length
+                  ? "Finish reveal"
+                  : "Reveal next card"
+                : undefined
+            }
+            className="min-h-11 rounded-full border border-border bg-background/90 px-4 py-2.5 text-sm font-semibold shadow-sm backdrop-blur transition hover:bg-muted"
           >
-            {phase === "tear" ? "Skip tear animation" : "Show all pulls"}
+            {phase === "tear"
+              ? prefersReducedMotion
+                ? "Open pack"
+                : "Skip tear animation"
+              : currentPack && revealedCount >= currentPack.length
+                ? "Finish reveal"
+                : "Reveal next"}
           </button>
+          {phase === "reveal" && (
+            <button
+              type="button"
+              onClick={handleAllRevealed}
+              aria-label="Show all pulls"
+              className="min-h-11 rounded-full border border-border bg-background/90 px-4 py-2.5 text-sm font-semibold shadow-sm backdrop-blur transition hover:bg-muted"
+            >
+              Show all
+            </button>
+          )}
         </div>
       )}
 
@@ -424,6 +526,7 @@ export function PackOpening({
             ))}
           </div>
           <button
+            ref={phase === "select" ? primaryActionRef : undefined}
             type="button"
             onClick={() => startPacks(browseSkin)}
             className="min-h-11 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition hover:opacity-90"
@@ -435,8 +538,12 @@ export function PackOpening({
 
       {/* single-pack summary */}
       {phase === "summary" && currentPack && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 overflow-y-auto p-6 pb-24 md:pb-6">
-          <h2 className="text-xl font-heading font-semibold text-foreground">
+        <div className="absolute inset-0 flex flex-col items-center justify-start gap-6 overflow-y-auto p-6 pb-24 md:justify-center md:pb-6">
+          <h2
+            ref={resultsHeadingRef}
+            tabIndex={-1}
+            className="text-xl font-heading font-semibold text-foreground outline-none"
+          >
             Pack results
           </h2>
           <div className="flex flex-wrap items-start justify-center gap-4">
@@ -445,6 +552,7 @@ export function PackOpening({
             ))}
           </div>
           <button
+            ref={primaryActionRef}
             type="button"
             onClick={backToSelect}
             className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
@@ -457,7 +565,11 @@ export function PackOpening({
       {/* combined results across all packs */}
       {phase === "final" && (
         <div className="absolute inset-0 flex flex-col items-center gap-6 overflow-y-auto p-6 pb-24 md:pb-6">
-          <h2 className="text-xl font-heading font-semibold text-foreground">
+          <h2
+            ref={resultsHeadingRef}
+            tabIndex={-1}
+            className="text-xl font-heading font-semibold text-foreground outline-none"
+          >
             All results · {packs.length} packs ·{" "}
             {openedSkin?.label ?? variant?.name}
           </h2>
@@ -504,6 +616,7 @@ export function PackOpening({
             </section>
           ))}
           <button
+            ref={primaryActionRef}
             type="button"
             onClick={backToSelect}
             className="mb-4 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
