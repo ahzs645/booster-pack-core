@@ -12,3 +12,16 @@ export {
   MANIFEST_PATH,
   type AssetBase,
 } from './manifest';
+export {
+  composeCover,
+  samplePalette,
+  zoomToMatch,
+  DEFAULT_RECIPE,
+  DEFAULT_TRANSFORM,
+  type ArtTransform,
+  type CoverRecipe,
+  type FitMode,
+  type FurnitureMode,
+  type Placement,
+} from './composeCover';
+export { describe, fromJSON, toJSON, type Adjustments } from './adjustments';
