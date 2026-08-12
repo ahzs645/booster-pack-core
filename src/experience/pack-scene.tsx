@@ -444,8 +444,13 @@ export function PackCarousel({
   // The ring is sized to the frame it is rendered in: on a phone-shaped canvas
   // the full radius pushes the neighbouring packs past both edges, so shrink it
   // until they stay inside the visible width. Wide canvases keep CAROUSEL_R.
-  const viewWidth = useThree((s) => s.viewport.width);
-  const radius = THREE.MathUtils.clamp(viewWidth * 0.5, 1.5, CAROUSEL_R);
+  const viewport = useThree((s) => s.viewport);
+  const compact = viewport.width < 4.4;
+  const radius = THREE.MathUtils.clamp(
+    viewport.width * (compact ? 0.38 : 0.5),
+    compact ? 1.1 : 1.5,
+    CAROUSEL_R,
+  );
   const groupRefs = useRef<(THREE.Group | null)[]>([]);
   const pack = use(packGeometry(assetBase));
   const normalTex = useMemo(() => makeWrinkleNormalTexture(), []);
@@ -569,12 +574,15 @@ export function PackCarousel({
       const a = st.angle + i * CAROUSEL_STEP;
       group.position.set(
         Math.sin(a) * radius,
-        reducedMotion ? 0 : Math.sin(t * 1.2 + i * 1.1) * 0.05,
+        (compact ? 0.42 : 0) +
+          (reducedMotion ? 0 : Math.sin(t * 1.2 + i * 1.1) * 0.05),
         -radius + Math.cos(a) * radius,
       );
       group.rotation.y = a * 0.55 + st.spin[i];
       const focus = (Math.cos(a) + 1) / 2;
-      group.scale.setScalar(0.62 + focus * 0.28);
+      group.scale.setScalar(
+        compact ? 0.43 + focus * 0.24 : 0.62 + focus * 0.28,
+      );
     }
   });
 

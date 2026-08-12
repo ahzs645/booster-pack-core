@@ -35,12 +35,14 @@ const container = document.getElementById("root");
 if (!container) throw new Error("Pack opening root element is missing");
 
 const root = createRoot(container);
+const isNativeHost = Boolean(window.webkit?.messageHandlers?.packBridge);
 root.render(
   <PackOpening
     // The iOS scheme handler proxies this host to the same R2 manifest used by
     // the website and falls back to PackOpening.bundle when offline.
-    assetBase="tcger-pack://assets"
+    assetBase={window.location.protocol === "tcger-pack:" ? "tcger-pack://assets" : ""}
     embedded
+    completionActionLabel={isNativeHost ? "Save pulls" : undefined}
     onEvent={emit}
   />,
 );

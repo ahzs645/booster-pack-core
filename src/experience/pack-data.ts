@@ -8,6 +8,9 @@ export interface PackCard {
   /** TCGdex localId within the card's set. */
   localId: string;
   imageRoot: string;
+  tcg: "pokemon";
+  setCode: string;
+  setName: string;
 }
 
 export interface PulledCard extends PackCard {
@@ -41,6 +44,9 @@ function card(
     tier,
     localId,
     imageRoot: EVOLVING_SKIES_IMAGE_ROOT,
+    tcg: "pokemon",
+    setCode: "swsh7",
+    setName: "Evolving Skies",
   };
 }
 
@@ -56,6 +62,9 @@ function baseCards(
     tier,
     localId,
     imageRoot: BASE_SET_IMAGE_ROOT,
+    tcg: "pokemon" as const,
+    setCode: "base1",
+    setName: "Base Set",
   }));
 }
 

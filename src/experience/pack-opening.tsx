@@ -32,7 +32,10 @@ import {
   useSkinTexture,
   type PackSkin,
 } from "./pack-skins";
-import type { PackOpeningProps } from "./types";
+import type {
+  PackOpeningProps,
+  PackOpeningPullSession,
+} from "./types";
 
 const PHASE_HINTS: Partial<Record<PackPhase, string>> = {
   select: "Swipe or drag to browse · spin a pack or use the button to open",
@@ -84,6 +87,7 @@ export function PackOpening({
   assetBase = "",
   embedded = false,
   debug = false,
+  completionActionLabel,
   onEvent,
 }: PackOpeningProps = {}) {
   const [phase, setPhase] = useState<PackPhase>("select");
@@ -93,6 +97,8 @@ export function PackOpening({
   const [uploads, setUploads] = useState<PackSkin[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [packs, setPacks] = useState<PulledCard[][]>([]);
+  const [openingID, setOpeningID] = useState("");
+  const [openedAt, setOpenedAt] = useState("");
   const [packIndex, setPackIndex] = useState(0);
   const [remountKey, setRemountKey] = useState(0);
   const [revealedCount, setRevealedCount] = useState(0);
@@ -120,6 +126,11 @@ export function PackOpening({
 
   const startPacks = useCallback(
     (skin: PackSkin) => {
+      setOpeningID(
+        globalThis.crypto?.randomUUID?.() ??
+          `opening-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
+      setOpenedAt(new Date().toISOString());
       setOpenedSkin(skin);
       setPacks(
         Array.from({ length: packCount }, () =>
@@ -138,6 +149,11 @@ export function PackOpening({
   );
 
   const rerollCurrent = useCallback(() => {
+    setOpeningID(
+      globalThis.crypto?.randomUUID?.() ??
+        `opening-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    setOpenedAt(new Date().toISOString());
     const packPool =
       openedSkin?.kind === "cover" ? openedSkin.packPool : undefined;
     setPacks((prev) =>
@@ -149,6 +165,30 @@ export function PackOpening({
     setRemountKey((k) => k + 1);
     setPhase("tear");
   }, [packIndex, forceChase, openedSkin]);
+
+  const requestSave = useCallback(() => {
+    if (!openingID || packs.length === 0) return;
+    const session: PackOpeningPullSession = {
+      id: openingID,
+      packLabel: openedSkin?.label ?? "Booster pack",
+      openedAt,
+      packs: packs.map((pack) =>
+        pack.map((card) => ({
+          cardId: card.id,
+          name: card.name,
+          rarity: card.rarity,
+          tier: card.tier,
+          collectorNumber: card.localId,
+          tcg: card.tcg,
+          setCode: card.setCode,
+          setName: card.setName,
+          imageUrl: card.imageUrl,
+          imageUrlSmall: card.imageUrlSmall,
+        })),
+      ),
+    };
+    onEvent?.({ type: "saveRequested", session });
+  }, [openedAt, openedSkin?.label, openingID, onEvent, packs]);
 
   const backToSelect = useCallback(() => {
     setPhase("select");
@@ -390,7 +430,7 @@ export function PackOpening({
           className={cn(
             "pointer-events-none absolute left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-border bg-background/85 px-3 py-1.5 text-center text-xs font-medium text-muted-foreground shadow-sm backdrop-blur sm:text-sm",
             phase === "select"
-              ? "bottom-64 sm:bottom-56"
+              ? "bottom-[9.25rem] sm:bottom-56"
               : phase === "tear" || phase === "reveal"
                 ? "bottom-24"
                 : "bottom-3",
@@ -450,8 +490,8 @@ export function PackOpening({
 
       {/* texture + pack count pickers on select screen */}
       {phase === "select" && (
-        <div className="absolute inset-x-3 bottom-12 flex flex-col items-center gap-2 rounded-xl border border-border bg-background/85 p-2 shadow-lg backdrop-blur sm:bottom-10">
-          <div className="flex w-full max-w-full gap-2 overflow-x-auto pb-1">
+        <div className="absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2 rounded-xl border border-border bg-background/90 p-2 shadow-lg backdrop-blur sm:bottom-10">
+          <div className="flex w-full max-w-full gap-1.5 overflow-x-auto pb-0.5 sm:gap-2 sm:pb-1">
             {skins.map((s) => {
               const active = browseSkin.id === s.id;
               const tint =
@@ -462,7 +502,7 @@ export function PackOpening({
                   type="button"
                   onClick={() => setBrowseSkin(s)}
                   className={cn(
-                    "min-h-10 shrink-0 rounded-full border border-border px-3 py-2 text-xs font-semibold transition",
+                    "min-h-9 shrink-0 rounded-full border border-border px-3 py-1.5 text-xs font-semibold transition sm:min-h-10 sm:py-2",
                     // Hovering must not repaint a selected chip: bg-muted under
                     // text-primary-foreground is dark on dark, so the label
                     // disappears under the cursor that just picked it.
@@ -490,7 +530,7 @@ export function PackOpening({
                 fits the image to the display panel and wraps it round the back. */}
             <label
               className={cn(
-                "min-h-10 cursor-pointer rounded-full border border-dashed border-border px-3 py-2 text-xs font-semibold transition hover:bg-muted",
+                "min-h-9 cursor-pointer rounded-full border border-dashed border-border px-3 py-1.5 text-xs font-semibold transition hover:bg-muted sm:min-h-10 sm:py-2",
                 !layout && "pointer-events-none opacity-50",
               )}
             >
@@ -511,32 +551,34 @@ export function PackOpening({
               {uploadError}
             </p>
           )}
-          <div className="flex justify-center gap-2">
-            {PACK_COUNTS.map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setPackCount(n)}
-                className={cn(
-                  "min-h-10 rounded-full border border-border px-4 py-2 text-sm font-semibold transition hover:bg-muted",
-                  packCount === n &&
-                    "border-primary bg-primary text-primary-foreground hover:bg-primary",
-                )}
-                aria-pressed={packCount === n}
-                aria-label={`Open ${n} ${n === 1 ? "pack" : "packs"}`}
-              >
-                ×{n}
-              </button>
-            ))}
+          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col">
+            <div className="flex shrink-0 justify-center gap-1.5 sm:gap-2">
+              {PACK_COUNTS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setPackCount(n)}
+                  className={cn(
+                    "min-h-9 rounded-full border border-border px-3 py-1.5 text-sm font-semibold transition hover:bg-muted sm:min-h-10 sm:px-4 sm:py-2",
+                    packCount === n &&
+                      "border-primary bg-primary text-primary-foreground hover:bg-primary",
+                  )}
+                  aria-pressed={packCount === n}
+                  aria-label={`Open ${n} ${n === 1 ? "pack" : "packs"}`}
+                >
+                  ×{n}
+                </button>
+              ))}
+            </div>
+            <button
+              ref={phase === "select" ? primaryActionRef : undefined}
+              type="button"
+              onClick={() => startPacks(browseSkin)}
+              className="min-h-10 min-w-0 flex-1 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition hover:opacity-90 sm:min-h-11 sm:flex-none sm:px-6 sm:py-2.5"
+            >
+              Open {packCount === 1 ? "pack" : `${packCount} packs`}
+            </button>
           </div>
-          <button
-            ref={phase === "select" ? primaryActionRef : undefined}
-            type="button"
-            onClick={() => startPacks(browseSkin)}
-            className="min-h-11 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition hover:opacity-90"
-          >
-            Open {packCount === 1 ? "this pack" : `${packCount} packs`}
-          </button>
         </div>
       )}
 
@@ -555,14 +597,26 @@ export function PackOpening({
               <PackResultCard key={card.id} card={card} index={i} />
             ))}
           </div>
-          <button
-            ref={primaryActionRef}
-            type="button"
-            onClick={backToSelect}
-            className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
-          >
-            Open more packs
-          </button>
+          <div className="flex flex-wrap justify-center gap-2">
+            {completionActionLabel && (
+              <button
+                ref={primaryActionRef}
+                type="button"
+                onClick={requestSave}
+                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+              >
+                {completionActionLabel}
+              </button>
+            )}
+            <button
+              ref={completionActionLabel ? undefined : primaryActionRef}
+              type="button"
+              onClick={backToSelect}
+              className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted"
+            >
+              Open more packs
+            </button>
+          </div>
         </div>
       )}
 
@@ -619,14 +673,26 @@ export function PackOpening({
               </div>
             </section>
           ))}
-          <button
-            ref={primaryActionRef}
-            type="button"
-            onClick={backToSelect}
-            className="mb-4 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
-          >
-            Open more packs
-          </button>
+          <div className="mb-4 flex flex-wrap justify-center gap-2">
+            {completionActionLabel && (
+              <button
+                ref={primaryActionRef}
+                type="button"
+                onClick={requestSave}
+                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+              >
+                {completionActionLabel}
+              </button>
+            )}
+            <button
+              ref={completionActionLabel ? undefined : primaryActionRef}
+              type="button"
+              onClick={backToSelect}
+              className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted"
+            >
+              Open more packs
+            </button>
+          </div>
         </div>
       )}
 
