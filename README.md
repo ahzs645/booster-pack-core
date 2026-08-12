@@ -1,6 +1,6 @@
 # Booster Pack Core
 
-The booster pack itself — mesh, cover sheets, and the code that reads them — shared by
+The booster pack itself — mesh, runtime cover composition, and the code that reads remote sheets — shared by
 [booster-pack-studio](https://github.com/ahzs645/booster-pack-studio), which authors covers, and
 TCGer, which opens packs wearing them.
 
@@ -21,7 +21,7 @@ src/
   uvFaces.ts     UV triangles, region classification, shell count
   splitMesh.ts   cuts the wrapper along a tear line
   manifest.ts    asset loading, re-anchored to whatever base path the app deploys under
-assets/pack/     the mesh, manifest.json, and the baked cover / base / decal sheets
+assets/pack/     the mesh, card back, and an empty local cover manifest
 scripts/
   sync-assets.mjs   copy assets into a consuming app's public dir
   verify-split.mjs  conservation checks on the splitter
@@ -37,9 +37,10 @@ node packages/pack-core/scripts/sync-assets.mjs public
 The sync step copies `assets/pack/` into the app's static directory, because neither Vite nor Next
 serves files out of a submodule. Gitignore the copy and re-run it after every submodule bump.
 
-Paths inside `manifest.json` are root-absolute (`/pack/covers/cover-01.png`). Pass the app's base
-path to `loadManifest({ base })` — Vite's `import.meta.env.BASE_URL`, Next's `basePath` — and every
-URL is re-anchored.
+Paths supplied by a remote `manifest.json` are root-absolute. Pass the app's asset origin or base
+path to `loadManifest({ base })` and every URL is re-anchored. The bundled manifest intentionally
+has empty cover, base, and decal registries: generated skins provide the offline fallback, while
+published projected wrappers live in object storage instead of Git.
 
 ## Tearing the pack
 

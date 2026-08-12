@@ -7,8 +7,8 @@ const cache = new Map<string, Promise<unknown>>();
 /**
  * Where the pack assets are served from, relative to the site root.
  *
- * The manifest stores root-absolute paths like `/pack/covers/cover-01.png`, which
- * only resolve when the app is served from the domain root. Both consumers deploy
+ * Remote manifests store root-absolute paths like `/pack/objects/hash.png`, which
+ * only resolve when the app is served from the asset origin. Consumers deploy
  * under a prefix at least some of the time — a GitHub project page lives at
  * `/<repo>/`, and TCGer's static demo export honours `basePath` — so every path is
  * re-anchored to a base the app supplies.

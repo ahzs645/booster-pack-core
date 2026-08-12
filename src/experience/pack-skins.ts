@@ -17,9 +17,9 @@ import { paintVariantSheet } from "./pack-sheet";
  * What the pack is wearing.
  *
  * All three end up as the same thing — one 1024×512 sheet on the shared mesh —
- * they just differ in where it came from: painted from a palette, baked in the
- * studio and committed to the shared assets, or composed here from an image you
- * dropped in.
+ * they just differ in where it came from: painted from a palette, projected in
+ * the studio and published remotely, or composed here from an image you dropped
+ * in.
  */
 export type PackSkin =
   | { kind: "variant"; id: string; label: string }
@@ -64,7 +64,7 @@ export function coverSkins(manifest: Manifest | null): PackSkin[] {
   }));
 }
 
-/** The cover sheets shipped in the shared assets, once the manifest arrives. */
+/** Cover sheets advertised by the selected local or remote manifest. */
 export function usePackManifest(assetBase = ""): Manifest | null {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   useEffect(() => {
