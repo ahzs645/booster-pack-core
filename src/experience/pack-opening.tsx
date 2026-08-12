@@ -245,7 +245,11 @@ export function PackOpening({
     [manifest, uploads],
   );
   const browseSheet = useSkinTexture(browseSkin, layout);
-  const openedSheet = useSkinTexture(skin, layout);
+  const handleSkinError = useCallback(
+    (message: string) => onEvent?.({ type: "error", message }),
+    [onEvent],
+  );
+  const openedSheet = useSkinTexture(skin, layout, handleSkinError);
 
   const handleUpload = useCallback(
     async (files: FileList | null) => {

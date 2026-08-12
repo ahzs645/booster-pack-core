@@ -91,6 +91,7 @@ export function usePackManifest(assetBase = ""): Manifest | null {
 export function useSkinTexture(
   skin: PackSkin,
   layout: SheetLayout | null,
+  onError?: (message: string) => void,
 ): THREE.Texture | null {
   const [loaded, setLoaded] = useState<THREE.Texture | null>(null);
 
@@ -106,20 +107,29 @@ export function useSkinTexture(
     }
     let live = true;
     const loader = new THREE.TextureLoader();
-    loader.load(skin.url, (tex) => {
-      if (!live) {
-        tex.dispose();
-        return;
-      }
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = 8;
-      tex.needsUpdate = true;
-      setLoaded(tex);
-    });
+    loader.load(
+      skin.url,
+      (tex) => {
+        if (!live) {
+          tex.dispose();
+          return;
+        }
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 8;
+        tex.needsUpdate = true;
+        setLoaded(tex);
+      },
+      undefined,
+      () => {
+        if (!live) return;
+        setLoaded(null);
+        onError?.(`Pack artwork failed to load: ${skin.label}`);
+      },
+    );
     return () => {
       live = false;
     };
-  }, [skin]);
+  }, [onError, skin]);
 
   if (skin.kind === "custom") return skin.texture;
   if (skin.kind === "cover") return loaded;
