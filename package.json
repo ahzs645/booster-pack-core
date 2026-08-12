@@ -1,0 +1,31 @@
+{
+  "name": "@tcg/pack-core",
+  "version": "0.1.0",
+  "description": "Shared booster-pack mesh, cover sheets and UV layout, consumed by booster-pack-studio and TCGer",
+  "type": "module",
+  "license": "UNLICENSED",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./assets/*": "./assets/*"
+  },
+  "files": [
+    "src",
+    "assets",
+    "scripts"
+  ],
+  "scripts": {
+    "sync-assets": "node scripts/sync-assets.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify-split": "node --experimental-strip-types scripts/verify-split.mjs"
+  },
+  "peerDependencies": {
+    "three": ">=0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "three": "^0.185.1",
+    "typescript": "~6.0.2"
+  }
+}
