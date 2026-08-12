@@ -15,6 +15,10 @@ export interface Cover {
   base: BaseId | null;
   /** Likewise the decal. */
   decal: DecalId | null;
+  /** Optional card pool used when this wrapper is opened. */
+  packPool?: string;
+  /** Optional generated-skin palette used for tear and reveal effects. */
+  accentVariant?: string;
 }
 
 export interface Manifest {

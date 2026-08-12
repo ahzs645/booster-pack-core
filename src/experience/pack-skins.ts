@@ -23,12 +23,25 @@ import { paintVariantSheet } from "./pack-sheet";
  */
 export type PackSkin =
   | { kind: "variant"; id: string; label: string }
-  | { kind: "cover"; id: string; label: string; url: string }
+  | {
+      kind: "cover";
+      id: string;
+      label: string;
+      url: string;
+      packPool?: string;
+      accentVariant?: string;
+    }
   | { kind: "custom"; id: string; label: string; texture: THREE.CanvasTexture };
 
 /** Skins keep a variant for their accent colours; the tear glow and charge-up need one. */
 export function skinVariant(skin: PackSkin): PackVariant {
-  return packVariantById(skin.kind === "variant" ? skin.id : PACK_VARIANTS[0].id);
+  const variantId =
+    skin.kind === "variant"
+      ? skin.id
+      : skin.kind === "cover"
+        ? skin.accentVariant
+        : undefined;
+  return packVariantById(variantId ?? PACK_VARIANTS[0].id);
 }
 
 export const VARIANT_SKINS: PackSkin[] = PACK_VARIANTS.map((v) => ({
@@ -43,6 +56,8 @@ export function coverSkins(manifest: Manifest | null): PackSkin[] {
     kind: "cover",
     id,
     label: cover.label,
+    packPool: cover.packPool,
+    accentVariant: cover.accentVariant,
     // The plain sheet: the decaled variant differs only by an overlay mark, and
     // offering both doubles the picker for a difference you cannot see at chip size.
     url: cover.plain,

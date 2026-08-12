@@ -96,7 +96,12 @@ export function PackOpening({
     (skin: PackSkin) => {
       setOpenedSkin(skin);
       setPacks(
-        Array.from({ length: packCount }, () => generatePack(forceChase)),
+        Array.from({ length: packCount }, () =>
+          generatePack(
+            forceChase,
+            skin.kind === "cover" ? skin.packPool : undefined,
+          ),
+        ),
       );
       setPackIndex(0);
       setRevealedCount(0);
@@ -107,13 +112,17 @@ export function PackOpening({
   );
 
   const rerollCurrent = useCallback(() => {
+    const packPool =
+      openedSkin?.kind === "cover" ? openedSkin.packPool : undefined;
     setPacks((prev) =>
-      prev.map((p, i) => (i === packIndex ? generatePack(forceChase) : p)),
+      prev.map((p, i) =>
+        i === packIndex ? generatePack(forceChase, packPool) : p,
+      ),
     );
     setRevealedCount(0);
     setRemountKey((k) => k + 1);
     setPhase("tear");
-  }, [packIndex, forceChase]);
+  }, [packIndex, forceChase, openedSkin]);
 
   const backToSelect = useCallback(() => {
     setPhase("select");
@@ -168,7 +177,10 @@ export function PackOpening({
         if (!live) return;
         onEvent?.({
           type: "error",
-          message: error instanceof Error ? error.message : "Pack assets failed to load",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Pack assets failed to load",
         });
       });
     return () => {
@@ -194,11 +206,17 @@ export function PackOpening({
       setUploadError(null);
       try {
         const image = await readImageFile(file);
-        const next = composeSkinFromImage(image, layout, file.name.replace(/\.[^.]+$/, ""));
+        const next = composeSkinFromImage(
+          image,
+          layout,
+          file.name.replace(/\.[^.]+$/, ""),
+        );
         setUploads((prev) => [...prev, next]);
         setBrowseSkin(next);
       } catch (err) {
-        setUploadError(err instanceof Error ? err.message : "could not read that file");
+        setUploadError(
+          err instanceof Error ? err.message : "could not read that file",
+        );
       }
     },
     [layout],
@@ -321,7 +339,7 @@ export function PackOpening({
       <p className="sr-only" role="status" aria-live="polite">
         {phase === "reveal" && currentPack
           ? `${revealedCount} of ${currentPack.length} cards revealed`
-          : PHASE_HINTS[phase] ?? `Pack opening phase: ${phase}`}
+          : (PHASE_HINTS[phase] ?? `Pack opening phase: ${phase}`)}
       </p>
 
       {/* texture + pack count pickers on select screen */}
@@ -330,7 +348,8 @@ export function PackOpening({
           <div className="flex w-full max-w-full gap-2 overflow-x-auto pb-1">
             {skins.map((s) => {
               const active = browseSkin.id === s.id;
-              const tint = s.kind === "variant" ? skinVariant(s).palette.mid : null;
+              const tint =
+                s.kind === "variant" ? skinVariant(s).palette.mid : null;
               return (
                 <button
                   key={s.id}
@@ -351,7 +370,9 @@ export function PackOpening({
                       "border-primary bg-primary text-primary-foreground hover:bg-primary",
                   )}
                   style={
-                    active && tint ? { background: tint, borderColor: tint } : undefined
+                    active && tint
+                      ? { background: tint, borderColor: tint }
+                      : undefined
                   }
                   aria-pressed={active}
                 >
@@ -380,7 +401,9 @@ export function PackOpening({
             </label>
           </div>
           {uploadError && (
-            <p className="text-xs font-medium text-destructive">{uploadError}</p>
+            <p className="text-xs font-medium text-destructive">
+              {uploadError}
+            </p>
           )}
           <div className="flex justify-center gap-2">
             {PACK_COUNTS.map((n) => (
@@ -435,7 +458,8 @@ export function PackOpening({
       {phase === "final" && (
         <div className="absolute inset-0 flex flex-col items-center gap-6 overflow-y-auto p-6 pb-24 md:pb-6">
           <h2 className="text-xl font-heading font-semibold text-foreground">
-            All results · {packs.length} packs · {variant?.name}
+            All results · {packs.length} packs ·{" "}
+            {openedSkin?.label ?? variant?.name}
           </h2>
           {(() => {
             const best = packs
@@ -443,9 +467,7 @@ export function PackOpening({
                 pack.map((card, j) => ({ card, key: `${i}-${j}` })),
               )
               .filter(({ card }) => tierRank(card.tier) >= 3)
-              .sort(
-                (a, b) => tierRank(b.card.tier) - tierRank(a.card.tier),
-              );
+              .sort((a, b) => tierRank(b.card.tier) - tierRank(a.card.tier));
             if (best.length === 0) return null;
             return (
               <section className="w-full max-w-4xl space-y-2">
@@ -471,7 +493,11 @@ export function PackOpening({
                     key={`${i}-${card.id}`}
                     card={card}
                     small
-                    index={i * 5 + j}
+                    index={
+                      packs
+                        .slice(0, i)
+                        .reduce((sum, item) => sum + item.length, 0) + j
+                    }
                   />
                 ))}
               </div>
@@ -498,7 +524,7 @@ export function PackOpening({
             <p className="flex justify-between">
               <span className="text-muted-foreground">packs</span>
               <span>
-                ×{packs.length} · {variant?.name}
+                ×{packs.length} · {openedSkin?.label ?? variant?.name}
               </span>
             </p>
           )}
