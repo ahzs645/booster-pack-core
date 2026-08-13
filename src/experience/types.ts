@@ -6,6 +6,8 @@ export type PackOpeningPhase =
   | "summary"
   | "final";
 
+export type PackOpeningMode = "normal" | "quick";
+
 export interface PackOpeningPull {
   cardId: string;
   name: string;
@@ -39,6 +41,8 @@ export interface PackOpeningNativeState {
   selectedPackID: string;
   selectedPackLabel: string;
   packCount: number;
+  openingMode: PackOpeningMode;
+  packBackwards: boolean;
   packOptions: PackOpeningNativePackOption[];
   revealedCount: number;
   totalCards: number;
@@ -52,6 +56,8 @@ export interface PackOpeningNativeState {
 export type PackOpeningNativeCommand =
   | { type: "selectPack"; id: string }
   | { type: "setPackCount"; count: number }
+  | { type: "setOpeningMode"; mode: PackOpeningMode }
+  | { type: "togglePackOrientation" }
   | { type: "openPack" }
   | { type: "backToPacks" }
   | { type: "advance" }
@@ -65,6 +71,7 @@ export type PackOpeningEvent =
   | { type: "nativeState"; state: PackOpeningNativeState }
   | { type: "haptic"; style: "selection" | "impact" | "success" }
   | { type: "saveRequested"; session: PackOpeningPullSession }
+  | { type: "inspectRequested"; pull: PackOpeningPull }
   | { type: "error"; message: string };
 
 export interface PackOpeningProps {

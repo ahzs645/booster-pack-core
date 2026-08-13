@@ -41,11 +41,14 @@ interface PackExperienceProps {
   sheet?: THREE.Texture | null;
   /** total packs being opened — bulk opens render the whole stack and one tear cuts all of them */
   packCount: number;
+  /** Keeps the deliberately flipped carousel orientation through the tear. */
+  backwards?: boolean;
   phase: PackPhase;
   controls: React.MutableRefObject<PackSceneControls>;
   onTorn: () => void;
   onOpened: () => void;
   onReveal: (revealedCount: number) => void;
+  onInspect: (card: PulledCard) => void;
   onAllRevealed: () => void;
   onFlash: () => void;
 }
@@ -319,47 +322,6 @@ const HOLO_FRAGMENT = /* glsl */ `
   }
 `;
 
-const SHEEN_VERTEX = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const SHEEN_FRAGMENT = /* glsl */ `
-  varying vec2 vUv;
-  uniform float uTime;
-  uniform float uOpacity;
-  void main() {
-    // A narrow display-space glint sells the laminated foil without laying a
-    // broad white veil over the printed artwork. Additive blending uses source
-    // alpha, so the highlight strength belongs in alpha rather than RGB alone.
-    float d = vUv.x * 0.75 + vUv.y * 0.5;
-    float p = fract(d * 0.8 - uTime * 0.075);
-    float band = smoothstep(0.455, 0.5, p) * smoothstep(0.545, 0.5, p);
-    float glint = pow(band, 1.35) * 0.16 * uOpacity;
-    gl_FragColor = vec4(vec3(1.0), glint);
-    #include <tonemapping_fragment>
-    #include <colorspace_fragment>
-  }
-`;
-
-/** Soft light band that sweeps across the wrapper, TCG Pocket style. */
-function makeSheenMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    vertexShader: SHEEN_VERTEX,
-    fragmentShader: SHEEN_FRAGMENT,
-    uniforms: {
-      uTime: { value: 0 },
-      uOpacity: { value: 1 },
-    },
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
-}
-
 function makeHoloMaterial(intensity: number): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: HOLO_VERTEX,
@@ -432,21 +394,21 @@ function FoilMaterial({
       side={doubleSide ? THREE.DoubleSide : THREE.FrontSide}
       map={map}
       normalMap={normalMap}
-      normalScale={new THREE.Vector2(0.09, 0.09)}
-      // A booster wrapper is printed ink beneath a glossy dielectric laminate,
-      // not bare metal. Keeping the ink layer non-metallic preserves contrast;
-      // the smooth clearcoat supplies the small, bright foil highlight.
-      metalness={dim ? 0.02 : 0.04}
-      roughness={dim ? 0.58 : 0.5}
-      clearcoat={dim ? 0.42 : 0.82}
-      clearcoatRoughness={dim ? 0.24 : 0.12}
+      normalScale={new THREE.Vector2(0.035, 0.035)}
+      // Keep the wrapper readable. Published scans already contain their
+      // printed foil/highlights, so scene lighting should shape the mesh rather
+      // than paint another glare layer over the artwork.
+      metalness={0}
+      roughness={dim ? 0.9 : 0.82}
+      clearcoat={dim ? 0.04 : 0.08}
+      clearcoatRoughness={0.78}
       clearcoatNormalMap={normalMap}
-      clearcoatNormalScale={new THREE.Vector2(0.035, 0.035)}
+      clearcoatNormalScale={new THREE.Vector2(0.012, 0.012)}
       ior={1.46}
-      specularIntensity={dim ? 0.32 : 0.48}
-      iridescence={dim ? 0 : 0.045}
+      specularIntensity={dim ? 0.06 : 0.1}
+      iridescence={0}
       iridescenceIOR={1.3}
-      envMapIntensity={dim ? 0.2 : 0.3}
+      envMapIntensity={dim ? 0.025 : 0.05}
       transparent
       alphaTest={0.02}
     />
@@ -467,7 +429,7 @@ interface PackCarouselProps {
   reducedMotion?: boolean;
   controls: React.MutableRefObject<PackSceneControls>;
   packCount: number;
-  onSelect: () => void;
+  onSelect: (backwards: boolean) => void;
 }
 
 const CAROUSEL_COPIES = 8;
@@ -626,9 +588,9 @@ export function PackCarousel({
   const groupRefs = useRef<(THREE.Group | null)[]>([]);
   const pack = use(packGeometry(assetBase));
   const normalTex = useMemo(() => makeWrinkleNormalTexture(), []);
-  const textures = useMemo(() => {
+  const packSheet = useMemo(() => {
     const map = sheet ?? paintVariantSheet(variant, pack.layout);
-    return { sheet: map, sheen: makeSheenMaterial() };
+    return map;
   }, [variant, sheet, pack.layout]);
 
   const ring = useRef({
@@ -648,6 +610,7 @@ export function PackCarousel({
       index: number;
       elapsed: number;
       fired: boolean;
+      backwards: boolean;
       poses: Array<{
         position: THREE.Vector3;
         rotationY: number;
@@ -665,11 +628,6 @@ export function PackCarousel({
   const beginSelection = useCallback(() => {
     const st = ring.current;
     if (st.transition) return;
-    if (reducedMotion) {
-      onSelect();
-      return;
-    }
-
     const index = focusedIndex();
     const poses = groupRefs.current.map((group) =>
       group
@@ -680,15 +638,19 @@ export function PackCarousel({
           }
         : null,
     );
-    if (!poses[index]) {
-      onSelect();
+    const selectedPose = poses[index];
+    const backwards = selectedPose
+      ? Math.cos(selectedPose.rotationY) < 0
+      : false;
+    if (reducedMotion || !selectedPose) {
+      onSelect(backwards);
       return;
     }
 
     st.drag = null;
     st.vel = 0;
     st.goto = null;
-    st.transition = { index, elapsed: 0, fired: false, poses };
+    st.transition = { index, elapsed: 0, fired: false, backwards, poses };
   }, [onSelect, reducedMotion]);
 
   useEffect(() => {
@@ -754,8 +716,6 @@ export function PackCarousel({
     const t = state.clock.elapsedTime;
     const st = ring.current;
 
-    textures.sheen.uniforms.uTime.value = reducedMotion ? 0 : t;
-
     if (st.transition) {
       const transition = st.transition;
       transition.elapsed = Math.min(0.56, transition.elapsed + dt);
@@ -766,6 +726,10 @@ export function PackCarousel({
         if (!group || !pose) return;
 
         if (index === transition.index) {
+          const baseTargetRotation = transition.backwards ? Math.PI : 0;
+          const targetRotation =
+            baseTargetRotation +
+            Math.round((pose.rotationY - baseTargetRotation) / TWO_PI) * TWO_PI;
           group.position.set(
             THREE.MathUtils.lerp(pose.position.x, 0, progress),
             THREE.MathUtils.lerp(pose.position.y, selectedY, progress),
@@ -773,7 +737,7 @@ export function PackCarousel({
           );
           group.rotation.y = THREE.MathUtils.lerp(
             pose.rotationY,
-            0,
+            targetRotation,
             progress,
           );
           group.scale.setScalar(
@@ -793,7 +757,7 @@ export function PackCarousel({
 
       if (transition.elapsed >= 0.56 && !transition.fired) {
         transition.fired = true;
-        onSelect();
+        onSelect(transition.backwards);
       }
       return;
     }
@@ -901,13 +865,8 @@ export function PackCarousel({
           {/* One mesh, one sheet: the wrap is a single continuous shell, so the
               front, back and both side gussets come from the same draw. */}
           <mesh geometry={pack.geometry}>
-            <FoilMaterial map={textures.sheet} normalMap={normalTex} />
+            <FoilMaterial map={packSheet} normalMap={normalTex} />
           </mesh>
-          <mesh
-            geometry={pack.geometry}
-            scale={1.002}
-            material={textures.sheen}
-          />
           {/* floor reflection */}
           <mesh
             geometry={pack.geometry}
@@ -915,7 +874,7 @@ export function PackCarousel({
             position={[0, -PACK_H * 1.02, 0]}
           >
             <meshBasicMaterial
-              map={textures.sheet}
+              map={packSheet}
               transparent
               opacity={0.09}
               depthWrite={false}
@@ -936,11 +895,13 @@ export function PackExperience({
   variant,
   sheet,
   packCount,
+  backwards = false,
   phase,
   controls,
   onTorn,
   onOpened,
   onReveal,
+  onInspect,
   onAllRevealed,
   onFlash,
 }: PackExperienceProps) {
@@ -968,7 +929,6 @@ export function PackExperience({
   );
   const normalTex = useMemo(() => makeWrinkleNormalTexture(), []);
   const glowTex = useMemo(() => makeGlowTexture(), []);
-  const sheenMat = useMemo(() => makeSheenMaterial(), []);
   const accentColor = useMemo(
     () => new THREE.Color(variant.palette.accent),
     [variant],
@@ -1146,7 +1106,8 @@ export function PackExperience({
 
   const handleStackClick = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    revealNext();
+    const card = cards[anim.current.topIndex];
+    if (phase === "reveal" && card) onInspect(card);
   };
 
   useFrame((state, rawDelta) => {
@@ -1190,7 +1151,16 @@ export function PackExperience({
         // while the user swipes. This keeps the trace aligned with their finger
         // and avoids an idle hover being mistaken for interaction feedback.
         pack.position.set(0, packBaseY, 0);
-        pack.rotation.set(0, 0, 0);
+        pack.rotation.x = 0;
+        pack.rotation.z = 0;
+        pack.rotation.y = reducedMotion
+          ? backwards ? Math.PI : 0
+          : THREE.MathUtils.damp(
+              pack.rotation.y,
+              backwards ? Math.PI : 0,
+              9,
+              dt,
+            );
       }
     }
 
@@ -1374,7 +1344,7 @@ export function PackExperience({
       }
     }
 
-    // --- holo + sheen shader uniforms ---------------------------------------
+    // --- card holo shader uniforms ------------------------------------------
     for (const mat of holoMaterials) {
       mat.uniforms.uTime.value = reducedMotion ? 0 : t;
       mat.uniforms.uTilt.value.set(
@@ -1382,9 +1352,6 @@ export function PackExperience({
         reducedMotion ? 0 : pointer.y,
       );
     }
-    sheenMat.uniforms.uTime.value = reducedMotion ? 0 : t;
-    sheenMat.uniforms.uOpacity.value =
-      wrapperMaterials.current[0]?.opacity ?? 1;
   });
 
   const cardsVisible = phase !== "summary" && phase !== "final";
@@ -1458,14 +1425,6 @@ export function PackExperience({
                       doubleSide
                     />
                   </mesh>
-                  {i === 0 && (
-                    <mesh
-                      geometry={cutGeos ? cutGeos.below : pack.geometry}
-                      renderOrder={6}
-                      scale={1.002}
-                      material={sheenMat}
-                    />
-                  )}
                   {i === 0 && seamGeos && (
                     <mesh geometry={seamGeos.below} renderOrder={7}>
                       <meshBasicMaterial
@@ -1497,14 +1456,6 @@ export function PackExperience({
                         doubleSide
                       />
                     </mesh>
-                  )}
-                  {i === 0 && cutGeos && (
-                    <mesh
-                      geometry={cutGeos.above}
-                      renderOrder={6}
-                      scale={1.002}
-                      material={sheenMat}
-                    />
                   )}
                   {i === 0 && seamGeos && (
                     <mesh geometry={seamGeos.above} renderOrder={7}>

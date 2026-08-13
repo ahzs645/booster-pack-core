@@ -35,6 +35,7 @@ import {
   type PackSkin,
 } from "./pack-skins";
 import type {
+  PackOpeningMode,
   PackOpeningNativeCommand,
   PackOpeningProps,
   PackOpeningPullSession,
@@ -96,6 +97,8 @@ export function PackOpening({
 }: PackOpeningProps = {}) {
   const [phase, setPhase] = useState<PackPhase>("select");
   const [packCount, setPackCount] = useState<number>(1);
+  const [openingMode, setOpeningMode] = useState<PackOpeningMode>("normal");
+  const [packBackwards, setPackBackwards] = useState(false);
   const [browseSkin, setBrowseSkin] = useState<PackSkin>(VARIANT_SKINS[0]);
   const [openedSkin, setOpenedSkin] = useState<PackSkin | null>(null);
   const [uploads, setUploads] = useState<PackSkin[]>([]);
@@ -130,7 +133,7 @@ export function PackOpening({
   }, [prefersReducedMotion]);
 
   const startPacks = useCallback(
-    (skin: PackSkin) => {
+    (skin: PackSkin, backwards = false) => {
       setArtworkWarning(null);
       setOpeningID(
         globalThis.crypto?.randomUUID?.() ??
@@ -138,6 +141,7 @@ export function PackOpening({
       );
       setOpenedAt(new Date().toISOString());
       setOpenedSkin(skin);
+      setPackBackwards(backwards);
       setPacks(
         Array.from({ length: packCount }, () =>
           generatePack(
@@ -233,21 +237,53 @@ export function PackOpening({
   // Bulk opens skip the card-by-card ritual: one tear, all results at once,
   // matching the reference app's multi-pack flow.
   const handleOpened = useCallback(() => {
-    if (packs.length > 1) {
+    if (openingMode === "quick") {
       setPhase("final");
     } else {
       setPhase("reveal");
       setRevealedCount(1);
     }
-  }, [packs.length]);
+  }, [openingMode]);
   const handleReveal = useCallback(
     (count: number) => setRevealedCount(count),
     [],
   );
   const handleAllRevealed = useCallback(() => {
+    if (openingMode === "normal" && packIndex < packs.length - 1) {
+      onEvent?.({ type: "haptic", style: "selection" });
+      setPackIndex((index) => index + 1);
+      setRevealedCount(0);
+      setRemountKey((key) => key + 1);
+      setPhase("tear");
+      return;
+    }
     onEvent?.({ type: "haptic", style: "success" });
     setPhase("summary");
+  }, [onEvent, openingMode, packIndex, packs.length]);
+  const skipToResults = useCallback(() => {
+    onEvent?.({ type: "haptic", style: "success" });
+    setPhase("final");
   }, [onEvent]);
+  const inspectCard = useCallback(
+    (card: PulledCard) => {
+      onEvent?.({
+        type: "inspectRequested",
+        pull: {
+          cardId: card.id,
+          name: card.name,
+          rarity: card.rarity,
+          tier: card.tier,
+          collectorNumber: card.localId,
+          tcg: card.tcg,
+          setCode: card.setCode,
+          setName: card.setName,
+          imageUrl: card.imageUrl,
+          imageUrlSmall: card.imageUrlSmall,
+        },
+      });
+    },
+    [onEvent],
+  );
   const handleFlash = useCallback(() => {
     onEvent?.({ type: "haptic", style: "selection" });
     setFlashKey((k) => k + 1);
@@ -388,6 +424,12 @@ export function PackOpening({
             setPackCount(command.count);
           }
           break;
+        case "setOpeningMode":
+          setOpeningMode(command.mode);
+          break;
+        case "togglePackOrientation":
+          setPackBackwards((value) => !value);
+          break;
         case "openPack":
           if (controls.current.openSelected) {
             controls.current.openSelected();
@@ -403,7 +445,9 @@ export function PackOpening({
           else if (phase === "reveal") controls.current.revealNext?.();
           break;
         case "showAll":
-          if (phase === "reveal") handleAllRevealed();
+          if (phase === "reveal" || phase === "tear" || phase === "opening") {
+            skipToResults();
+          }
           break;
         case "savePulls":
           requestSave();
@@ -444,6 +488,7 @@ export function PackOpening({
     nativeControls,
     phase,
     requestSave,
+    skipToResults,
     skins,
     startPacks,
   ]);
@@ -457,6 +502,8 @@ export function PackOpening({
         selectedPackID: (phase === "select" ? browseSkin : skin).id,
         selectedPackLabel: (phase === "select" ? browseSkin : skin).label,
         packCount,
+        openingMode,
+        packBackwards,
         packOptions: skins.map(
           ({ id, label, setID, setLabel, variationLabel }) => ({
             id,
@@ -489,6 +536,8 @@ export function PackOpening({
     nativeControls,
     onEvent,
     packCount,
+    openingMode,
+    packBackwards,
     packIndex,
     packs.length,
     phase,
@@ -563,7 +612,7 @@ export function PackOpening({
                 reducedMotion={prefersReducedMotion}
                 controls={controls}
                 packCount={packCount}
-                onSelect={() => startPacks(browseSkin)}
+                onSelect={(backwards) => startPacks(browseSkin, backwards)}
               />
             ) : currentPack && variant ? (
               <PackExperience
@@ -572,12 +621,17 @@ export function PackOpening({
                 cards={currentPack}
                 variant={variant}
                 sheet={openingSheet}
-                packCount={packs.length}
+                // Keep the unopened stack visible in both modes. Normal opens
+                // the front pack card-by-card, then returns with one fewer
+                // wrapper; Quick skips directly to the grouped results.
+                packCount={Math.max(1, packs.length - packIndex)}
+                backwards={packBackwards}
                 phase={phase}
                 controls={controls}
                 onTorn={handleTorn}
                 onOpened={handleOpened}
                 onReveal={handleReveal}
+                onInspect={inspectCard}
                 onAllRevealed={handleAllRevealed}
                 onFlash={handleFlash}
               />
