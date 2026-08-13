@@ -8,6 +8,8 @@ import autoprefixer from "autoprefixer";
 import postcss from "postcss";
 import tailwindcss from "tailwindcss";
 
+await import("./verify-assets.mjs");
+
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outFlag = process.argv.indexOf("--out");
 const requested = outFlag >= 0 ? process.argv[outFlag + 1] : undefined;

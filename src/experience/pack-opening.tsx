@@ -1,6 +1,7 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
+import * as THREE from "three";
 import {
   Suspense,
   useCallback,
@@ -19,6 +20,7 @@ import { packGeometry } from "./pack-mesh";
 import {
   PackExperience,
   PackCarousel,
+  FoilEnvironment,
   type PackPhase,
   type PackSceneControls,
 } from "./pack-scene";
@@ -140,7 +142,7 @@ export function PackOpening({
         Array.from({ length: packCount }, () =>
           generatePack(
             forceChase,
-            skin.kind === "cover" ? skin.packPool : undefined,
+            skin.packPool,
           ),
         ),
       );
@@ -158,8 +160,7 @@ export function PackOpening({
         `opening-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     setOpenedAt(new Date().toISOString());
-    const packPool =
-      openedSkin?.kind === "cover" ? openedSkin.packPool : undefined;
+    const packPool = openedSkin?.packPool;
     setPacks((prev) =>
       prev.map((p, i) =>
         i === packIndex ? generatePack(forceChase, packPool) : p,
@@ -307,10 +308,26 @@ export function PackOpening({
     return () => window.cancelAnimationFrame(frame);
   }, [phase, prefersReducedMotion]);
 
-  const skins = useMemo(
-    () => [...VARIANT_SKINS, ...coverSkins(manifest), ...uploads],
-    [manifest, uploads],
-  );
+  const skins = useMemo(() => {
+    const publishedCovers = coverSkins(manifest);
+    const setsWithPublishedArtwork = new Set(
+      publishedCovers.map((cover) => cover.setID),
+    );
+    // Real published booster art replaces the generated fallback choices for
+    // its set. This keeps Base Set to Charizard/Blastoise/Venusaur instead of
+    // mixing those with unrelated demo wrappers, while offline-only sets still
+    // remain usable.
+    const generatedFallbacks = VARIANT_SKINS.filter(
+      (skin) => !setsWithPublishedArtwork.has(skin.setID),
+    );
+    return [...publishedCovers, ...generatedFallbacks, ...uploads];
+  }, [manifest, uploads]);
+  useEffect(() => {
+    if (skins.some((option) => option.id === browseSkin.id)) return;
+    const replacement =
+      skins.find((option) => option.setID === browseSkin.setID) ?? skins[0];
+    if (replacement) setBrowseSkin(replacement);
+  }, [browseSkin, skins]);
   const browseSheet = useSkinTexture(browseSkin, layout);
   const handleSkinError = useCallback(
     (message: string) =>
@@ -318,6 +335,10 @@ export function PackOpening({
     [],
   );
   const openedSheet = useSkinTexture(skin, layout, handleSkinError);
+  // The pack that leaves the carousel must retain the same GPU texture through
+  // the tear stage. Repainting/reloading an equivalent sheet here caused a
+  // visible exposure and artwork pop during the component handoff.
+  const openingSheet = skin.id === browseSkin.id ? browseSheet : openedSheet;
 
   const handleUpload = useCallback(
     async (files: FileList | null) => {
@@ -368,7 +389,11 @@ export function PackOpening({
           }
           break;
         case "openPack":
-          startPacks(browseSkin);
+          if (controls.current.openSelected) {
+            controls.current.openSelected();
+          } else {
+            startPacks(browseSkin);
+          }
           break;
         case "backToPacks":
           backToSelect();
@@ -432,7 +457,15 @@ export function PackOpening({
         selectedPackID: (phase === "select" ? browseSkin : skin).id,
         selectedPackLabel: (phase === "select" ? browseSkin : skin).label,
         packCount,
-        packOptions: skins.map(({ id, label }) => ({ id, label })),
+        packOptions: skins.map(
+          ({ id, label, setID, setLabel, variationLabel }) => ({
+            id,
+            label,
+            setID,
+            setLabel,
+            variationLabel,
+          }),
+        ),
         revealedCount,
         totalCards: currentPack?.length ?? 0,
         currentPackNumber: packs.length > 0 ? packIndex + 1 : 0,
@@ -505,14 +538,31 @@ export function PackOpening({
             alpha: true,
             powerPreference: "high-performance",
           }}
+          onCreated={({ gl }) => {
+            gl.outputColorSpace = THREE.SRGBColorSpace;
+            gl.toneMapping = THREE.ACESFilmicToneMapping;
+            gl.toneMappingExposure = 0.86;
+          }}
         >
           <Suspense fallback={null}>
+            {/* One persistent light/environment rig spans selection and opening
+                so the chosen pack never changes exposure at the handoff. */}
+            <FoilEnvironment />
+            <ambientLight intensity={0.3} />
+            <directionalLight position={[3, 5, 6]} intensity={0.5} />
+            <directionalLight
+              position={[-4, -2, 4]}
+              intensity={0.1}
+              color="#8fb7ff"
+            />
             {phase === "select" ? (
               <PackCarousel
                 assetBase={assetBase}
                 variant={skinVariant(browseSkin)}
                 sheet={browseSheet}
                 reducedMotion={prefersReducedMotion}
+                controls={controls}
+                packCount={packCount}
                 onSelect={() => startPacks(browseSkin)}
               />
             ) : currentPack && variant ? (
@@ -521,7 +571,7 @@ export function PackOpening({
                 key={`${packIndex}-${remountKey}`}
                 cards={currentPack}
                 variant={variant}
-                sheet={openedSheet}
+                sheet={openingSheet}
                 packCount={packs.length}
                 phase={phase}
                 controls={controls}

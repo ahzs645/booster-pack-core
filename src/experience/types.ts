@@ -29,6 +29,9 @@ export interface PackOpeningPullSession {
 export interface PackOpeningNativePackOption {
   id: string;
   label: string;
+  setID: string;
+  setLabel: string;
+  variationLabel: string;
 }
 
 export interface PackOpeningNativeState {

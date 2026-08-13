@@ -24,6 +24,7 @@ src/
 assets/pack/     the mesh, card back, and an empty local cover manifest
 scripts/
   sync-assets.mjs   copy assets into a consuming app's public dir
+  verify-assets.mjs reject published wrapper art or populated registries in Git
   verify-split.mjs  conservation checks on the splitter
 ```
 
@@ -41,6 +42,27 @@ Paths supplied by a remote `manifest.json` are root-absolute. Pass the app's ass
 path to `loadManifest({ base })` and every URL is re-anchored. The bundled manifest intentionally
 has empty cover, base, and decal registries: generated skins provide the offline fallback, while
 published projected wrappers live in object storage instead of Git.
+
+## Pack artwork rule
+
+Published wrapper artwork must live in the `tcger-assets` R2 bucket, never in
+this repository or an embedded consumer bundle. R2 objects use content-addressed
+`/pack/objects/<sha256>.<ext>` keys with immutable caching; `/pack/manifest.json`
+is the short-lived pointer that supplies the pack metadata and object URLs.
+
+To publish studio exports, use the repository-level publisher:
+
+```bash
+npm run assets:r2:publish-pack-assets -- \
+  --projected-dir "/path/to/projected exports" \
+  --bucket tcger-assets \
+  --wrangler
+```
+
+Do not add raster files under `assets/pack/covers`, `assets/pack/bases`, or
+`assets/pack/decals`, and do not populate those registries in the bundled
+manifest. `npm run verify-assets` enforces both requirements. Generated skins
+remain the offline fallback when the remote manifest is unavailable.
 
 ## Tearing the pack
 

@@ -7,7 +7,15 @@ import {
   type ThreeEvent,
 } from "@react-three/fiber";
 import { splitGeometryByCut, type CutFn, type SplitMesh } from "../index";
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
@@ -21,6 +29,7 @@ export type { PackOpeningPhase as PackPhase } from "./types";
 export interface PackSceneControls {
   timeScale: number;
   reducedMotion: boolean;
+  openSelected?: () => void;
   revealNext?: () => void;
 }
 
@@ -45,6 +54,9 @@ const TEAR_FRAC = 0.8;
 const TEAR_Y = PACK_H * (TEAR_FRAC - 0.5);
 const CARD_W = 2.02;
 const CARD_H = CARD_W * (88 / 63);
+// Standard trading-card corners are approximately a 3 mm radius on a 63 mm
+// card. Keep this ratio as the single silhouette source for every card layer.
+const CARD_CORNER_RADIUS = CARD_W * (3 / 63);
 const GOLD = new THREE.Color("#ffd76a");
 
 /* ---------------------------------- helpers --------------------------------- */
@@ -53,6 +65,37 @@ const GOLD = new THREE.Color("#ffd76a");
 // art, bounded above by the crimp
 const CUT_MIN = TEAR_Y - 0.55 * (PACK_H / 3.3);
 const CUT_MAX = TEAR_Y + 0.34 * (PACK_H / 3.3);
+
+/**
+ * One rounded silhouette for the scan, holo pass, and card back. Using geometry
+ * instead of source-image alpha also clips scans whose corner pixels are opaque.
+ */
+function makeRoundedCardGeometry(): THREE.ShapeGeometry {
+  const halfWidth = CARD_W / 2;
+  const halfHeight = CARD_H / 2;
+  const radius = CARD_CORNER_RADIUS;
+  const shape = new THREE.Shape();
+
+  shape.moveTo(-halfWidth + radius, -halfHeight);
+  shape.lineTo(halfWidth - radius, -halfHeight);
+  shape.quadraticCurveTo(halfWidth, -halfHeight, halfWidth, -halfHeight + radius);
+  shape.lineTo(halfWidth, halfHeight - radius);
+  shape.quadraticCurveTo(halfWidth, halfHeight, halfWidth - radius, halfHeight);
+  shape.lineTo(-halfWidth + radius, halfHeight);
+  shape.quadraticCurveTo(-halfWidth, halfHeight, -halfWidth, halfHeight - radius);
+  shape.lineTo(-halfWidth, -halfHeight + radius);
+  shape.quadraticCurveTo(-halfWidth, -halfHeight, -halfWidth + radius, -halfHeight);
+
+  const geometry = new THREE.ShapeGeometry(shape, 8);
+  const positions = geometry.getAttribute("position");
+  const uvs = new Float32Array(positions.count * 2);
+  for (let index = 0; index < positions.count; index += 1) {
+    uvs[index * 2] = (positions.getX(index) + halfWidth) / CARD_W;
+    uvs[index * 2 + 1] = (positions.getY(index) + halfHeight) / CARD_H;
+  }
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  return geometry;
+}
 
 /**
  * Piecewise-linear cut line through the user's actual drag path — lightly
@@ -289,15 +332,16 @@ const SHEEN_FRAGMENT = /* glsl */ `
   uniform float uTime;
   uniform float uOpacity;
   void main() {
-    // This used to be masked by the sheet's alpha, back when the wrapper was a
-    // canvas that punched out its own rounded corners and crimp serrations. Cover
-    // sheets are fully opaque — the silhouette is the mesh now, not the texture —
-    // so that term was always 1 and the band ran at full strength over the whole
-    // wrap. The mask is gone and the amplitude is set for an unmasked sweep.
+    // A narrow display-space glint sells the laminated foil without laying a
+    // broad white veil over the printed artwork. Additive blending uses source
+    // alpha, so the highlight strength belongs in alpha rather than RGB alone.
     float d = vUv.x * 0.75 + vUv.y * 0.5;
-    float p = fract(d * 0.8 - uTime * 0.1);
-    float band = smoothstep(0.40, 0.5, p) * smoothstep(0.60, 0.5, p);
-    gl_FragColor = vec4(vec3(1.0) * band * 0.12 * uOpacity, 0.0);
+    float p = fract(d * 0.8 - uTime * 0.075);
+    float band = smoothstep(0.455, 0.5, p) * smoothstep(0.545, 0.5, p);
+    float glint = pow(band, 1.35) * 0.16 * uOpacity;
+    gl_FragColor = vec4(vec3(1.0), glint);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 
@@ -388,19 +432,21 @@ function FoilMaterial({
       side={doubleSide ? THREE.DoubleSide : THREE.FrontSide}
       map={map}
       normalMap={normalMap}
-      normalScale={new THREE.Vector2(0.06, 0.06)}
-      // Tuned for the slab, these blew out on the mesh: a flat plane shows one
-      // highlight lobe mostly off-axis, where the wrap's curved face puts a wide
-      // band at the mirror angle all at once and the sheet vanished under it.
-      // Roughly the studio's numbers for the same mesh, plus a little clearcoat
-      // for the plastic and a trace of iridescence for the foil.
-      metalness={dim ? 0.3 : 0.36}
-      roughness={dim ? 0.5 : 0.42}
-      clearcoat={dim ? 0.2 : 0.3}
-      clearcoatRoughness={0.35}
-      iridescence={dim ? 0 : 0.1}
+      normalScale={new THREE.Vector2(0.09, 0.09)}
+      // A booster wrapper is printed ink beneath a glossy dielectric laminate,
+      // not bare metal. Keeping the ink layer non-metallic preserves contrast;
+      // the smooth clearcoat supplies the small, bright foil highlight.
+      metalness={dim ? 0.02 : 0.04}
+      roughness={dim ? 0.58 : 0.5}
+      clearcoat={dim ? 0.42 : 0.82}
+      clearcoatRoughness={dim ? 0.24 : 0.12}
+      clearcoatNormalMap={normalMap}
+      clearcoatNormalScale={new THREE.Vector2(0.035, 0.035)}
+      ior={1.46}
+      specularIntensity={dim ? 0.32 : 0.48}
+      iridescence={dim ? 0 : 0.045}
       iridescenceIOR={1.3}
-      envMapIntensity={dim ? 0.4 : 0.55}
+      envMapIntensity={dim ? 0.2 : 0.3}
       transparent
       alphaTest={0.02}
     />
@@ -419,6 +465,8 @@ interface PackCarouselProps {
    */
   sheet?: THREE.Texture | null;
   reducedMotion?: boolean;
+  controls: React.MutableRefObject<PackSceneControls>;
+  packCount: number;
   onSelect: () => void;
 }
 
@@ -426,6 +474,122 @@ const CAROUSEL_COPIES = 8;
 const CAROUSEL_STEP = (Math.PI * 2) / CAROUSEL_COPIES;
 const CAROUSEL_R = 3.4;
 const TWO_PI = Math.PI * 2;
+
+function openingPackScale(viewportWidth: number, viewportHeight: number) {
+  return THREE.MathUtils.clamp(
+    Math.min(
+      (viewportWidth * 0.78) / PACK_W,
+      (viewportHeight * 0.68) / PACK_H,
+    ),
+    0.72,
+    1,
+  );
+}
+
+const PACK_STACK_LIFT = PACK_H * 0.11;
+const PACK_STACK_DEPTH = PACK_W * 0.16;
+
+function packStackProgress(index: number, packCount: number) {
+  const visibleCount = Math.min(packCount, 10);
+  return visibleCount > 1 ? index / (visibleCount - 1) : 0;
+}
+
+function openingPackBaseY(compact: boolean, packCount: number) {
+  // Anchor the highest wrapper at the same vertical line for ×1, ×5 and ×10.
+  // The whole stack has one fixed lift, divided across however many wrappers
+  // are visible, so ×10 stays as compact and aligned as ×5.
+  const singlePackY = compact ? -1.12 : -0.2;
+  const stackLift = packCount > 1 ? PACK_STACK_LIFT : 0;
+  return singlePackY - stackLift;
+}
+
+interface LoadedCardStackProps {
+  assetBase: string;
+  cards: PulledCard[];
+  holoMaterials: THREE.ShaderMaterial[];
+  stackRef: React.RefObject<THREE.Group | null>;
+  cardRefs: React.RefObject<(THREE.Group | null)[]>;
+  readyRef: React.RefObject<boolean>;
+  onPointerDown: (event: ThreeEvent<PointerEvent>) => void;
+}
+
+/**
+ * Card artwork is intentionally isolated behind its own Suspense boundary.
+ * Loading remote scans must never suspend the sealed wrapper that is already
+ * on screen; the cards can warm invisibly while the user tears the pack.
+ */
+function LoadedCardStack({
+  assetBase,
+  cards,
+  holoMaterials,
+  stackRef,
+  cardRefs,
+  readyRef,
+  onPointerDown,
+}: LoadedCardStackProps) {
+  const frontTextures = useLoader(
+    THREE.TextureLoader,
+    cards.map((card) => card.imageUrl),
+  );
+  const backTexture = useLoader(
+    THREE.TextureLoader,
+    `${assetBase.replace(/\/$/, "")}/pack/card-backs/pokemon.png`,
+  );
+  const cardGeometry = useMemo(() => makeRoundedCardGeometry(), []);
+
+  useEffect(() => {
+    for (const texture of [...frontTextures, backTexture]) {
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 8;
+      texture.needsUpdate = true;
+    }
+    readyRef.current = true;
+    return () => {
+      readyRef.current = false;
+      cardGeometry.dispose();
+    };
+  }, [backTexture, cardGeometry, frontTextures, readyRef]);
+
+  return (
+    <group
+      ref={stackRef}
+      position={[0, -0.15, 0]}
+      scale={0.92}
+      visible={false}
+      onPointerDown={onPointerDown}
+    >
+      {cards.map((card, index) => (
+        <group
+          key={card.id}
+          ref={(group) => {
+            cardRefs.current[index] = group;
+          }}
+          position={[0, 0, -index * 0.012]}
+        >
+          <mesh>
+            <primitive object={cardGeometry} attach="geometry" />
+            {/* unlit + untonemapped: card scans render exactly as-is */}
+            <meshBasicMaterial
+              map={frontTextures[index]}
+              transparent
+              alphaTest={0.05}
+              toneMapped={false}
+            />
+          </mesh>
+          {holoIntensityFor(card) > 0 && (
+            <mesh position={[0, 0, 0.002]} material={holoMaterials[index]}>
+              <primitive object={cardGeometry} attach="geometry" />
+            </mesh>
+          )}
+          <mesh rotation={[0, Math.PI, 0]} position={[0, 0, -0.003]}>
+            <primitive object={cardGeometry} attach="geometry" />
+            <meshBasicMaterial map={backTexture} toneMapped={false} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
 
 /**
  * Pocket-style select carousel: a ring of identical packs of the chosen
@@ -438,19 +602,27 @@ export function PackCarousel({
   variant,
   sheet,
   reducedMotion = false,
+  controls,
+  packCount,
   onSelect,
 }: PackCarouselProps) {
   const [hovered, setHovered] = useState(false);
-  // The ring is sized to the frame it is rendered in: on a phone-shaped canvas
-  // the full radius pushes the neighbouring packs past both edges, so shrink it
-  // until they stay inside the visible width. Wide canvases keep CAROUSEL_R.
+  // On phones, put the adjacent pack centres close to the viewport edges. This
+  // leaves a deliberate half-pack peek on each side instead of overlapping the
+  // focused pack like a stack of cards.
   const viewport = useThree((s) => s.viewport);
   const compact = viewport.width < 4.4;
   const radius = THREE.MathUtils.clamp(
-    viewport.width * (compact ? 0.38 : 0.5),
-    compact ? 1.1 : 1.5,
+    viewport.width * (compact ? 0.72 : 0.5),
+    compact ? 1.8 : 1.5,
     CAROUSEL_R,
   );
+  const focusedScale = compact
+    ? THREE.MathUtils.clamp((viewport.width * 0.5) / PACK_W, 0.5, 0.64)
+    : 0.88;
+  const restingScale = focusedScale * (compact ? 0.67 : 0.7);
+  const selectedScale = openingPackScale(viewport.width, viewport.height);
+  const selectedY = openingPackBaseY(compact, packCount);
   const groupRefs = useRef<(THREE.Group | null)[]>([]);
   const pack = use(packGeometry(assetBase));
   const normalTex = useMemo(() => makeWrinkleNormalTexture(), []);
@@ -471,6 +643,17 @@ export function PackCarousel({
       lastX: number;
       moved: number;
     },
+    resumeAutoAt: 0,
+    transition: null as null | {
+      index: number;
+      elapsed: number;
+      fired: boolean;
+      poses: Array<{
+        position: THREE.Vector3;
+        rotationY: number;
+        scale: number;
+      } | null>;
+    },
   });
 
   const focusedIndex = () => {
@@ -478,6 +661,44 @@ export function PackCarousel({
     const n = CAROUSEL_COPIES;
     return ((Math.round(-st.angle / CAROUSEL_STEP) % n) + n) % n;
   };
+
+  const beginSelection = useCallback(() => {
+    const st = ring.current;
+    if (st.transition) return;
+    if (reducedMotion) {
+      onSelect();
+      return;
+    }
+
+    const index = focusedIndex();
+    const poses = groupRefs.current.map((group) =>
+      group
+        ? {
+            position: group.position.clone(),
+            rotationY: group.rotation.y,
+            scale: group.scale.x,
+          }
+        : null,
+    );
+    if (!poses[index]) {
+      onSelect();
+      return;
+    }
+
+    st.drag = null;
+    st.vel = 0;
+    st.goto = null;
+    st.transition = { index, elapsed: 0, fired: false, poses };
+  }, [onSelect, reducedMotion]);
+
+  useEffect(() => {
+    controls.current.openSelected = beginSelection;
+    return () => {
+      if (controls.current.openSelected === beginSelection) {
+        controls.current.openSelected = undefined;
+      }
+    };
+  }, [beginSelection, controls]);
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -500,10 +721,11 @@ export function PackCarousel({
       if (!st.drag) return;
       const { mode, idx, moved } = st.drag;
       st.drag = null;
+      st.resumeAutoAt = performance.now() + 1600;
       if (mode === "pack" && moved < 6) {
         // a tap, not a drag
         if (idx === focusedIndex()) {
-          onSelect();
+          beginSelection();
         } else {
           // bring the tapped pack to the front (closest turn direction)
           const target = -idx * CAROUSEL_STEP;
@@ -519,7 +741,7 @@ export function PackCarousel({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [onSelect]);
+  }, [beginSelection]);
 
   useEffect(() => {
     document.body.style.cursor = hovered ? "pointer" : "";
@@ -531,6 +753,50 @@ export function PackCarousel({
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime;
     const st = ring.current;
+
+    textures.sheen.uniforms.uTime.value = reducedMotion ? 0 : t;
+
+    if (st.transition) {
+      const transition = st.transition;
+      transition.elapsed = Math.min(0.56, transition.elapsed + dt);
+      const progress = easeOutCubic(transition.elapsed / 0.56);
+
+      groupRefs.current.forEach((group, index) => {
+        const pose = transition.poses[index];
+        if (!group || !pose) return;
+
+        if (index === transition.index) {
+          group.position.set(
+            THREE.MathUtils.lerp(pose.position.x, 0, progress),
+            THREE.MathUtils.lerp(pose.position.y, selectedY, progress),
+            THREE.MathUtils.lerp(pose.position.z, 0, progress),
+          );
+          group.rotation.y = THREE.MathUtils.lerp(
+            pose.rotationY,
+            0,
+            progress,
+          );
+          group.scale.setScalar(
+            THREE.MathUtils.lerp(pose.scale, selectedScale, progress),
+          );
+        } else {
+          group.position.set(
+            pose.position.x * (1 + progress * 0.3),
+            pose.position.y,
+            pose.position.z - progress * 1.4,
+          );
+          group.scale.setScalar(
+            THREE.MathUtils.lerp(pose.scale, pose.scale * 0.16, progress),
+          );
+        }
+      });
+
+      if (transition.elapsed >= 0.56 && !transition.fired) {
+        transition.fired = true;
+        onSelect();
+      }
+      return;
+    }
 
     // ring physics: momentum → snap to the nearest slot (or an explicit goto)
     if (!st.drag || st.drag.mode !== "ring") {
@@ -547,15 +813,21 @@ export function PackCarousel({
         st.vel = THREE.MathUtils.damp(st.vel, 0, 3, dt);
         if (st.goto !== null) {
           st.angle = THREE.MathUtils.damp(st.angle, st.goto, 6, dt);
-          if (Math.abs(st.angle - st.goto) < 0.005) st.goto = null;
+          if (Math.abs(st.angle - st.goto) < 0.005) {
+            st.goto = null;
+            st.resumeAutoAt = performance.now() + 1200;
+          }
         } else if (Math.abs(st.vel) < 0.4) {
-          const nearest = Math.round(st.angle / CAROUSEL_STEP) * CAROUSEL_STEP;
-          st.angle = THREE.MathUtils.damp(st.angle, nearest, 4, dt);
+          if (performance.now() >= st.resumeAutoAt) {
+            st.angle += dt * 0.13;
+          } else {
+            const nearest =
+              Math.round(st.angle / CAROUSEL_STEP) * CAROUSEL_STEP;
+            st.angle = THREE.MathUtils.damp(st.angle, nearest, 4, dt);
+          }
         }
       }
     }
-
-    textures.sheen.uniforms.uTime.value = reducedMotion ? 0 : t;
 
     for (let i = 0; i < CAROUSEL_COPIES; i++) {
       // per-pack free spin with inertia — the rotation you leave it at is
@@ -573,27 +845,25 @@ export function PackCarousel({
       const a = st.angle + i * CAROUSEL_STEP;
       group.position.set(
         Math.sin(a) * radius,
-        (compact ? 0.42 : 0) +
+        (compact ? 0.18 : 0) +
           (reducedMotion ? 0 : Math.sin(t * 1.2 + i * 1.1) * 0.05),
         -radius + Math.cos(a) * radius,
       );
-      group.rotation.y = a * 0.55 + st.spin[i];
+      group.rotation.y = a * 0.82 + st.spin[i];
       const focus = (Math.cos(a) + 1) / 2;
       group.scale.setScalar(
-        compact ? 0.43 + focus * 0.24 : 0.62 + focus * 0.28,
+        THREE.MathUtils.lerp(restingScale, focusedScale, focus),
       );
     }
   });
 
   return (
     <group>
-      <FoilEnvironment />
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[3, 5, 6]} intensity={0.9} />
       {/* backdrop drag-catcher: swiping empty space rotates the ring */}
       <mesh
         position={[0, 0, -6]}
         onPointerDown={(e) => {
+          ring.current.resumeAutoAt = performance.now() + 1800;
           ring.current.drag = {
             mode: "ring",
             idx: -1,
@@ -619,6 +889,7 @@ export function PackCarousel({
           onPointerOut={() => setHovered(false)}
           onPointerDown={(e) => {
             e.stopPropagation();
+            ring.current.resumeAutoAt = performance.now() + 1800;
             ring.current.drag = {
               mode: "pack",
               idx: i,
@@ -646,7 +917,7 @@ export function PackCarousel({
             <meshBasicMaterial
               map={textures.sheet}
               transparent
-              opacity={0.13}
+              opacity={0.09}
               depthWrite={false}
               side={THREE.DoubleSide}
             />
@@ -675,6 +946,8 @@ export function PackExperience({
 }: PackExperienceProps) {
   const stackCount = Math.min(packCount, 10);
   const viewport = useThree((state) => state.viewport);
+  const compact = viewport.width < 4.4;
+  const packScale = openingPackScale(viewport.width, viewport.height);
   // Leave the reveal card clear of phone-sized host controls. The old fixed
   // 1.12 scale nearly filled a portrait canvas, so native top/bottom overlays
   // appeared to crop the scan even though the WebGL scene itself was intact.
@@ -684,25 +957,10 @@ export function PackExperience({
     1.05,
   );
   // bulk stacks sit lower so the upward cascade stays in frame
-  const packBaseY = stackCount > 1 ? -0.55 : 0;
+  const packBaseY = openingPackBaseY(compact, stackCount);
   const [cutGeos, setCutGeos] = useState<SplitMesh | null>(null);
   const cutBuiltRef = useRef(false);
   const pack = use(packGeometry(assetBase));
-  const frontTextures = useLoader(
-    THREE.TextureLoader,
-    cards.map((c) => c.imageUrl),
-  );
-  const backTexture = useLoader(
-    THREE.TextureLoader,
-    `${assetBase.replace(/\/$/, "")}/pack/card-backs/pokemon.png`,
-  );
-
-  useMemo(() => {
-    for (const tex of [...frontTextures, backTexture]) {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = 8;
-    }
-  }, [frontTextures, backTexture]);
 
   const sheetTex = useMemo(
     () => sheet ?? paintVariantSheet(variant, pack.layout),
@@ -743,6 +1001,7 @@ export function PackExperience({
   const bodyRefs = useRef<(THREE.Group | null)[]>([]);
   const stackRef = useRef<THREE.Group>(null);
   const cardRefs = useRef<(THREE.Group | null)[]>([]);
+  const cardAssetsReadyRef = useRef(false);
   const tearHeadRef = useRef<THREE.Sprite>(null);
   // glowing polyline tracing the user's actual drag path
   const tearTrail = useMemo(() => {
@@ -927,40 +1186,11 @@ export function PackExperience({
     if (packRef.current) {
       const pack = packRef.current;
       if (phase === "tear") {
-        // hold the pack steady while the user is cutting so the trail lands
-        // where they actually drag
-        if (tear.active) {
-          pack.position.y = THREE.MathUtils.damp(
-            pack.position.y,
-            packBaseY,
-            10,
-            dt,
-          );
-          pack.rotation.y = THREE.MathUtils.damp(pack.rotation.y, 0, 10, dt);
-          pack.rotation.x = THREE.MathUtils.damp(pack.rotation.x, 0, 10, dt);
-        } else if (!reducedMotion) {
-          // bulk stacks barely tilt — seen edge-on, the pitched slats splay
-          // into a fanned mess (reference app locks its stack down too)
-          const tiltY = stackCount > 1 ? 0.06 : 0.35;
-          const tiltX = stackCount > 1 ? 0.04 : 0.2;
-          pack.position.y = packBaseY + Math.sin(t * 1.3) * 0.06;
-          pack.rotation.y = THREE.MathUtils.damp(
-            pack.rotation.y,
-            pointer.x * tiltY,
-            4,
-            dt,
-          );
-          pack.rotation.x = THREE.MathUtils.damp(
-            pack.rotation.x,
-            -pointer.y * tiltX,
-            4,
-            dt,
-          );
-        } else {
-          pack.position.y = packBaseY;
-          pack.rotation.y = THREE.MathUtils.damp(pack.rotation.y, 0, 10, dt);
-          pack.rotation.x = THREE.MathUtils.damp(pack.rotation.x, 0, 10, dt);
-        }
+        // The tear target must stay completely stationary while waiting and
+        // while the user swipes. This keeps the trace aligned with their finger
+        // and avoids an idle hover being mistaken for interaction feedback.
+        pack.position.set(0, packBaseY, 0);
+        pack.rotation.set(0, 0, 0);
       }
     }
 
@@ -1001,7 +1231,10 @@ export function PackExperience({
     }
 
     // --- opening timeline ----------------------------------------------------
-    if (phase === "opening") {
+    // Keep the already-visible wrapper in place if the user skips the tear
+    // before the hidden card scans finish warming. Once ready, the ordinary
+    // opening timeline begins without ever exposing an empty canvas.
+    if (phase === "opening" && cardAssetsReadyRef.current) {
       const duration = 1.7 + (stackCount - 1) * 0.12;
       a.openT = reducedMotion ? 1 : Math.min(1, a.openT + dt / duration);
       const T = a.openT * (duration / 1.7); // in single-pack time units
@@ -1158,15 +1391,6 @@ export function PackExperience({
 
   return (
     <group>
-      <FoilEnvironment />
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[3, 5, 6]} intensity={1.0} />
-      <directionalLight
-        position={[-4, -2, 4]}
-        intensity={0.35}
-        color="#8fb7ff"
-      />
-
       {/* charge glow behind the stack */}
       <sprite ref={chargeGlowRef} position={[0, 0, 0.3]} visible={false}>
         <spriteMaterial
@@ -1178,52 +1402,30 @@ export function PackExperience({
         />
       </sprite>
 
-      {/* card stack — mounted only once the pack is actually opening, so
-          cards can never poke through the sealed wrapper */}
-      {(phase === "opening" || phase === "reveal") && (
-        <group
-          ref={stackRef}
-          position={[0, -0.15, 0]}
-          scale={0.92}
-          visible={false}
-          onPointerDown={handleStackClick}
-        >
-          {cards.map((card, i) => (
-            <group
-              key={card.id}
-              ref={(g) => {
-                cardRefs.current[i] = g;
-              }}
-              position={[0, 0, -i * 0.012]}
-            >
-              <mesh>
-                <planeGeometry args={[CARD_W, CARD_H]} />
-                {/* unlit + untonemapped: card scans render exactly as-is */}
-                <meshBasicMaterial
-                  map={frontTextures[i]}
-                  transparent
-                  alphaTest={0.05}
-                  toneMapped={false}
-                />
-              </mesh>
-              {holoIntensityFor(card) > 0 && (
-                <mesh position={[0, 0, 0.002]} material={holoMaterials[i]}>
-                  <planeGeometry args={[CARD_W, CARD_H]} />
-                </mesh>
-              )}
-              <mesh rotation={[0, Math.PI, 0]} position={[0, 0, -0.003]}>
-                <planeGeometry args={[CARD_W, CARD_H]} />
-                <meshBasicMaterial map={backTexture} toneMapped={false} />
-              </mesh>
-            </group>
-          ))}
-        </group>
+      {/* Start fetching scans behind the sealed wrapper during the tear phase.
+          Its local boundary keeps a slow card request from hiding the pack. */}
+      {cardsVisible && (
+        <Suspense fallback={null}>
+          <LoadedCardStack
+            assetBase={assetBase}
+            cards={cards}
+            holoMaterials={holoMaterials}
+            stackRef={stackRef}
+            cardRefs={cardRefs}
+            readyRef={cardAssetsReadyRef}
+            onPointerDown={handleStackClick}
+          />
+        </Suspense>
       )}
 
       {/* booster pack stack — bulk opens cascade upward so every pack peeks
           out above the one in front, like the reference app */}
       {cardsVisible && (
-        <group ref={packRef} position={[0, packBaseY, 0]}>
+        <group
+          ref={packRef}
+          position={[0, packBaseY, 0]}
+          scale={packScale}
+        >
           {Array.from({ length: stackCount }).map((_, i) => (
             // all packs upright and parallel, each directly behind the one in
             // front, peeking above it — reference-app stack
@@ -1231,8 +1433,8 @@ export function PackExperience({
               key={i}
               position={[
                 0,
-                i * (stackCount > 6 ? 0.14 : 0.22) - PACK_H / 2,
-                -i * 0.16,
+                packStackProgress(i, stackCount) * PACK_STACK_LIFT - PACK_H / 2,
+                -packStackProgress(i, stackCount) * PACK_STACK_DEPTH,
               ]}
             >
               <group position={[0, PACK_H / 2, 0]}>

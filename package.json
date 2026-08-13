@@ -19,7 +19,9 @@
   "scripts": {
     "build:embed": "node scripts/build-embed.mjs",
     "sync-assets": "node scripts/sync-assets.mjs",
+    "pretypecheck": "npm run verify-assets",
     "typecheck": "tsc --noEmit",
+    "verify-assets": "node scripts/verify-assets.mjs",
     "verify-split": "node --experimental-strip-types scripts/verify-split.mjs"
   },
   "peerDependencies": {

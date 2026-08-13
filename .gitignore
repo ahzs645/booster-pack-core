@@ -2,3 +2,9 @@ node_modules
 dist
 *.local
 .DS_Store
+
+# Published wrapper artwork belongs in R2. Only the mesh, card back, and empty
+# local manifest are bundled for offline/generated fallbacks.
+assets/pack/covers/
+assets/pack/bases/
+assets/pack/decals/

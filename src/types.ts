@@ -17,6 +17,12 @@ export interface Cover {
   decal: DecalId | null;
   /** Optional card pool used when this wrapper is opened. */
   packPool?: string;
+  /** Set identity used to group related booster artworks in native pickers. */
+  setCode?: string;
+  /** Human-readable set name shown before the artwork variation picker. */
+  setName?: string;
+  /** Short artwork name, for example Charizard or Pack Art 2. */
+  variationLabel?: string;
   /** Optional generated-skin palette used for tear and reveal effects. */
   accentVariant?: string;
 }

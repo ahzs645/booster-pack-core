@@ -22,46 +22,98 @@ import { paintVariantSheet } from "./pack-sheet";
  * in.
  */
 export type PackSkin =
-  | { kind: "variant"; id: string; label: string }
+  | {
+      kind: "variant";
+      id: string;
+      label: string;
+      variantID: string;
+      setID: string;
+      setLabel: string;
+      variationLabel: string;
+      packPool: string;
+    }
   | {
       kind: "cover";
       id: string;
       label: string;
       url: string;
-      packPool?: string;
+      packPool: string;
+      setID: string;
+      setLabel: string;
+      variationLabel: string;
       accentVariant?: string;
     }
-  | { kind: "custom"; id: string; label: string; texture: THREE.CanvasTexture };
+  | {
+      kind: "custom";
+      id: string;
+      label: string;
+      texture: THREE.CanvasTexture;
+      packPool: string;
+      setID: string;
+      setLabel: string;
+      variationLabel: string;
+    };
 
 /** Skins keep a variant for their accent colours; the tear glow and charge-up need one. */
 export function skinVariant(skin: PackSkin): PackVariant {
   const variantId =
     skin.kind === "variant"
-      ? skin.id
+      ? skin.variantID
       : skin.kind === "cover"
         ? skin.accentVariant
         : undefined;
   return packVariantById(variantId ?? PACK_VARIANTS[0].id);
 }
 
-export const VARIANT_SKINS: PackSkin[] = PACK_VARIANTS.map((v) => ({
-  kind: "variant",
-  id: v.id,
-  label: v.name,
-}));
+const GENERATED_PACK_SETS = [
+  { id: "base1", label: "Base Set" },
+  { id: "me5", label: "Pitch Black" },
+] as const;
+
+/**
+ * Offline-safe set/variation choices. Each set points at its own real pull
+ * pool, while the variations are lightweight generated wrappers. Published
+ * cover art joins the same grouping through manifest metadata below.
+ */
+export const VARIANT_SKINS: PackSkin[] = GENERATED_PACK_SETS.flatMap((set) =>
+  PACK_VARIANTS.map((variant) => ({
+    kind: "variant" as const,
+    id: `${set.id}:${variant.id}`,
+    label: `${set.label} · ${variant.name}`,
+    variantID: variant.id,
+    setID: set.id,
+    setLabel: set.label,
+    variationLabel: `${variant.name} wrapper`,
+    packPool: set.id,
+  })),
+);
+
+function setLabelForPool(pool: string): string {
+  return GENERATED_PACK_SETS.find((set) => set.id === pool)?.label ?? "Other";
+}
 
 export function coverSkins(manifest: Manifest | null): PackSkin[] {
-  if (!manifest) return [];
-  return Object.entries(manifest.covers).map(([id, cover]) => ({
-    kind: "cover",
-    id,
-    label: cover.label,
-    packPool: cover.packPool,
-    accentVariant: cover.accentVariant,
-    // The plain sheet: the decaled variant differs only by an overlay mark, and
-    // offering both doubles the picker for a difference you cannot see at chip size.
-    url: cover.plain,
-  }));
+  return Object.entries(manifest?.covers ?? {}).map(([id, cover]) => {
+    const packPool = cover.packPool ?? cover.setCode ?? "swsh7";
+    const setID = cover.setCode ?? packPool;
+    const setLabel = cover.setName ?? setLabelForPool(packPool);
+    const inferredVariationLabel = cover.label.includes("·")
+      ? cover.label.split("·").at(-1)?.trim() ?? cover.label
+      : cover.label;
+    return {
+      kind: "cover" as const,
+      id,
+      label: cover.label,
+      packPool,
+      setID,
+      setLabel,
+      variationLabel: cover.variationLabel ?? inferredVariationLabel,
+      accentVariant: cover.accentVariant,
+      // The plain sheet: the decaled variant differs only by an overlay mark, and
+      // offering both doubles the picker for a difference you cannot see at chip size.
+      url: cover.plain,
+    };
+  });
 }
 
 /** Cover sheets advertised by the selected local or remote manifest. */
@@ -97,7 +149,11 @@ export function useSkinTexture(
 
   const painted = useMemo(() => {
     if (skin.kind !== "variant" || !layout) return null;
-    return paintVariantSheet(packVariantById(skin.id), layout);
+    return paintVariantSheet(packVariantById(skin.variantID), layout, {
+      setName: skin.setLabel,
+      variationName: skin.variationLabel,
+      cardCount: skin.packPool === "base1" ? 11 : 5,
+    });
   }, [skin, layout]);
 
   useEffect(() => {
@@ -168,7 +224,16 @@ export function composeSkinFromImage(
   texture.anisotropy = 8;
   texture.needsUpdate = true;
 
-  return { kind: "custom", id: `custom-${label}`, label, texture };
+  return {
+    kind: "custom",
+    id: `custom-${label}`,
+    label,
+    texture,
+    packPool: "swsh7",
+    setID: "custom",
+    setLabel: "Custom Artwork",
+    variationLabel: label,
+  };
 }
 
 /** Decodes a picked file, rejecting anything that is not an image the browser can read. */

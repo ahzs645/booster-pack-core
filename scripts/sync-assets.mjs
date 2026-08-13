@@ -14,6 +14,8 @@ import { cp, mkdir, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+await import('./verify-assets.mjs');
+
 const here = dirname(fileURLToPath(import.meta.url));
 const source = resolve(here, '..', 'assets', 'pack');
 

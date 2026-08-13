@@ -3,6 +3,12 @@ import * as THREE from "three";
 
 import type { PackVariant } from "./pack-data";
 
+export interface PackSheetMetadata {
+  setName: string;
+  variationName: string;
+  cardCount: number;
+}
+
 /**
  * Paints a variant as a wrap sheet.
  *
@@ -152,6 +158,7 @@ function drawSeams(ctx: CanvasRenderingContext2D, layout: SheetLayout) {
 export function paintVariantSheet(
   variant: PackVariant,
   layout: SheetLayout,
+  metadata?: PackSheetMetadata,
 ): THREE.CanvasTexture {
   const { width, height } = layout;
   const { palette } = variant;
@@ -220,13 +227,27 @@ export function paintVariantSheet(
     ctx.shadowBlur = 0;
     ctx.font = `700 ${Math.round(f.w * 0.067)}px system-ui, sans-serif`;
     ctx.fillStyle = palette.accent;
-    ctx.fillText(variant.name.toUpperCase(), cx, f.y + f.h * 0.325);
+    ctx.fillText(
+      (metadata?.setName ?? variant.name).toUpperCase(),
+      cx,
+      f.y + f.h * 0.325,
+    );
     ctx.font = `600 ${Math.round(f.w * 0.055)}px system-ui, sans-serif`;
     ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.fillText("DEMO BOOSTER", cx, f.y + f.h * 0.64);
+    ctx.fillText(
+      (metadata?.variationName ?? "Demo booster").toUpperCase(),
+      cx,
+      f.y + f.h * 0.64,
+    );
     ctx.font = `500 ${Math.round(f.w * 0.041)}px system-ui, sans-serif`;
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.fillText("5 CARDS · EVOLVING SKIES POOL", cx, f.y + f.h * 0.895);
+    ctx.fillText(
+      metadata
+        ? `${metadata.cardCount} CARDS · ${metadata.setName.toUpperCase()} POOL`
+        : "5 CARDS · EVOLVING SKIES POOL",
+      cx,
+      f.y + f.h * 0.895,
+    );
   });
 
   // Reverse face gets the wordmark only, like the back of a real wrapper.
@@ -234,7 +255,7 @@ export function paintVariantSheet(
     ctx.font = `600 ${Math.round(block.h * 0.055)}px system-ui, sans-serif`;
     ctx.fillStyle = "rgba(255,255,255,0.35)";
     ctx.fillText(
-      `TCGer · ${variant.name.toUpperCase()}`,
+      `TCGer · ${(metadata?.setName ?? variant.name).toUpperCase()}`,
       block.x + block.w / 2,
       block.y + block.h * 0.5,
     );

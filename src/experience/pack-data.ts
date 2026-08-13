@@ -11,6 +11,7 @@ export interface PackCard {
   tcg: "pokemon";
   setCode: string;
   setName: string;
+  imageSource?: "tcgdex" | "pokemoncard";
 }
 
 export interface PulledCard extends PackCard {
@@ -20,15 +21,42 @@ export interface PulledCard extends PackCard {
 
 const EVOLVING_SKIES_IMAGE_ROOT = "https://assets.tcgdex.net/en/swsh/swsh7";
 const BASE_SET_IMAGE_ROOT = "https://assets.tcgdex.net/en/base/base1";
+const PITCH_BLACK_IMAGE_ROOT = "https://images.pokemoncard.io/images/me5";
 
 export function packCardImageUrls(card: PackCard): {
   imageUrl: string;
   imageUrlSmall: string;
 } {
+  if (card.imageSource === "pokemoncard") {
+    const file = `${card.setCode}-${card.localId}`;
+    return {
+      imageUrl: `${card.imageRoot}/${file}_hiresopt.jpg`,
+      imageUrlSmall: `${card.imageRoot}/${file}.png`,
+    };
+  }
   return {
     imageUrl: `${card.imageRoot}/${card.localId}/high.webp`,
     imageUrlSmall: `${card.imageRoot}/${card.localId}/low.webp`,
   };
+}
+
+function pitchBlackCards(
+  rarity: string,
+  tier: PackRarityTier,
+  rows: Array<[string, string]>,
+): PackCard[] {
+  return rows.map(([localId, name]) => ({
+    id: `me5-${localId}`,
+    name,
+    rarity,
+    tier,
+    localId,
+    imageRoot: PITCH_BLACK_IMAGE_ROOT,
+    imageSource: "pokemoncard" as const,
+    tcg: "pokemon" as const,
+    setCode: "me5",
+    setName: "Pitch Black",
+  }));
 }
 
 function card(
@@ -232,6 +260,110 @@ export const BASE_SET_POOL: Record<PackRarityTier, PackCard[]> = {
   chase: baseCards("Holo Rare", "chase", [["4", "Charizard"]]),
 };
 
+/**
+ * Curated English Pitch Black (ME5) pool. Its wrapper advertises ten cards, so
+ * generation below follows a six-common, three-uncommon, one-rare-or-better
+ * recipe and uses the current ME5 scans supplied by PokemonCard.
+ */
+export const PITCH_BLACK_POOL: Record<PackRarityTier, PackCard[]> = {
+  common: pitchBlackCards("Common", "common", [
+    ["1", "Tropius"],
+    ["2", "Grubbin"],
+    ["3", "Fomantis"],
+    ["5", "Poltchageist"],
+    ["9", "Sizzlipede"],
+    ["11", "Charcadet"],
+    ["13", "Goldeen"],
+    ["15", "Wailmer"],
+    ["18", "Popplio"],
+    ["21", "Finizen"],
+    ["23", "Electrike"],
+    ["25", "Charjabug"],
+    ["29", "Slowpoke"],
+    ["33", "Shuppet"],
+    ["36", "Litwick"],
+    ["42", "Mankey"],
+    ["44", "Cranidos"],
+    ["46", "Drilbur"],
+    ["49", "Vullaby"],
+    ["51", "Inkay"],
+    ["53", "Nickit"],
+    ["57", "Maschiff"],
+    ["60", "Skarmory"],
+    ["61", "Shieldon"],
+    ["63", "Bronzor"],
+    ["66", "Pikipek"],
+    ["69", "Type: Null"],
+    ["71", "Bombirdier"],
+  ]),
+  uncommon: pitchBlackCards("Uncommon", "uncommon", [
+    ["6", "Sinistcha"],
+    ["7", "Heatran"],
+    ["14", "Seaking"],
+    ["17", "Relicanth"],
+    ["19", "Brionne"],
+    ["22", "Palafin"],
+    ["24", "Manectric"],
+    ["26", "Vikavolt"],
+    ["30", "Slowbro"],
+    ["34", "Banette"],
+    ["37", "Lampent"],
+    ["39", "Dhelmise"],
+    ["40", "Marshadow"],
+    ["41", "Annihilape"],
+    ["52", "Malamar"],
+    ["54", "Thievul"],
+    ["64", "Bronzong"],
+    ["68", "Toucannon"],
+  ]),
+  rare: pitchBlackCards("Rare", "rare", [
+    ["12", "Armarouge"],
+    ["20", "Primarina"],
+    ["28", "Miraidon"],
+    ["35", "Spiritomb"],
+    ["47", "Koraidon"],
+    ["56", "Zarude"],
+    ["59", "Chi-Yu"],
+    ["62", "Bastiodon"],
+    ["70", "Silvally"],
+    ["83", "Shadowy Darkness Energy"],
+    ["84", "Voltaic Lightning Energy"],
+  ]),
+  ultra: [
+    ...pitchBlackCards("Double Rare", "ultra", [
+      ["4", "Lurantis ex"],
+      ["8", "Mega Delphox ex"],
+      ["16", "Wailord ex"],
+      ["27", "Mega Zeraora ex"],
+      ["31", "Mega Slowbro ex"],
+      ["38", "Mega Chandelure ex"],
+      ["45", "Rampardos ex"],
+      ["48", "Mega Darkrai ex"],
+      ["55", "Morpeko ex"],
+      ["65", "Mega Excadrill ex"],
+    ]),
+    ...pitchBlackCards("Ultra Rare", "ultra", [
+      ["98", "Mega Zeraora ex"],
+      ["99", "Mega Chandelure ex"],
+      ["101", "Mega Darkrai ex"],
+      ["103", "Mega Excadrill ex"],
+    ]),
+  ],
+  chase: [
+    ...pitchBlackCards("Special Illustration Rare", "chase", [
+      ["114", "Mega Zeraora ex"],
+      ["115", "Mega Chandelure ex"],
+      ["116", "Mega Darkrai ex"],
+      ["117", "Morpeko ex"],
+      ["118", "Gladion's Final Battle"],
+      ["119", "Gwynn"],
+    ]),
+    ...pitchBlackCards("Mega Hyper Rare", "chase", [
+      ["120", "Mega Darkrai ex"],
+    ]),
+  ],
+};
+
 export interface PackVariantPalette {
   top: string;
   mid: string;
@@ -340,6 +472,13 @@ function rollBaseRare(): PackRarityTier {
   return "rare";
 }
 
+function rollPitchBlackRare(): PackRarityTier {
+  const roll = Math.random();
+  if (roll < 0.03) return "chase";
+  if (roll < 0.35) return "ultra";
+  return "rare";
+}
+
 function generateFromTiers(
   pool: Record<PackRarityTier, PackCard[]>,
   tiers: PackRarityTier[],
@@ -373,6 +512,20 @@ export function generatePack(
       "uncommon",
       "uncommon",
       forceChase ? "chase" : rollBaseRare(),
+    ]);
+  }
+  if (packPool === "me5") {
+    return generateFromTiers(PITCH_BLACK_POOL, [
+      "common",
+      "common",
+      "common",
+      "common",
+      "common",
+      "common",
+      "uncommon",
+      "uncommon",
+      "uncommon",
+      forceChase ? "chase" : rollPitchBlackRare(),
     ]);
   }
   const tiers: PackRarityTier[] = [
