@@ -33,6 +33,7 @@ import {
   type PackSkin,
 } from "./pack-skins";
 import type {
+  PackOpeningNativeCommand,
   PackOpeningProps,
   PackOpeningPullSession,
 } from "./types";
@@ -87,6 +88,7 @@ export function PackOpening({
   assetBase = "",
   embedded = false,
   debug = false,
+  nativeControls = false,
   completionActionLabel,
   onEvent,
 }: PackOpeningProps = {}) {
@@ -96,6 +98,7 @@ export function PackOpening({
   const [openedSkin, setOpenedSkin] = useState<PackSkin | null>(null);
   const [uploads, setUploads] = useState<PackSkin[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [artworkWarning, setArtworkWarning] = useState<string | null>(null);
   const [packs, setPacks] = useState<PulledCard[][]>([]);
   const [openingID, setOpeningID] = useState("");
   const [openedAt, setOpenedAt] = useState("");
@@ -126,6 +129,7 @@ export function PackOpening({
 
   const startPacks = useCallback(
     (skin: PackSkin) => {
+      setArtworkWarning(null);
       setOpeningID(
         globalThis.crypto?.randomUUID?.() ??
           `opening-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -189,6 +193,29 @@ export function PackOpening({
     };
     onEvent?.({ type: "saveRequested", session });
   }, [openedAt, openedSkin?.label, openingID, onEvent, packs]);
+
+  const completedSession = useMemo<PackOpeningPullSession | undefined>(() => {
+    if (!openingID || packs.length === 0) return undefined;
+    return {
+      id: openingID,
+      packLabel: openedSkin?.label ?? "Booster pack",
+      openedAt,
+      packs: packs.map((pack) =>
+        pack.map((card) => ({
+          cardId: card.id,
+          name: card.name,
+          rarity: card.rarity,
+          tier: card.tier,
+          collectorNumber: card.localId,
+          tcg: card.tcg,
+          setCode: card.setCode,
+          setName: card.setName,
+          imageUrl: card.imageUrl,
+          imageUrlSmall: card.imageUrlSmall,
+        })),
+      ),
+    };
+  }, [openedAt, openedSkin?.label, openingID, packs]);
 
   const backToSelect = useCallback(() => {
     setPhase("select");
@@ -286,8 +313,9 @@ export function PackOpening({
   );
   const browseSheet = useSkinTexture(browseSkin, layout);
   const handleSkinError = useCallback(
-    (message: string) => onEvent?.({ type: "error", message }),
-    [onEvent],
+    (message: string) =>
+      setArtworkWarning(`${message}. Using a generated wrapper instead.`),
+    [],
   );
   const openedSheet = useSkinTexture(skin, layout, handleSkinError);
 
@@ -320,6 +348,122 @@ export function PackOpening({
     phase === "tear" ||
     phase === "opening" ||
     phase === "reveal";
+
+  useEffect(() => {
+    if (!nativeControls) return;
+
+    const handleCommand = (event: Event) => {
+      const command = (event as CustomEvent<PackOpeningNativeCommand>).detail;
+      switch (command.type) {
+        case "selectPack": {
+          const next = skins.find((option) => option.id === command.id);
+          if (next) setBrowseSkin(next);
+          break;
+        }
+        case "setPackCount":
+          if (
+            PACK_COUNTS.includes(command.count as (typeof PACK_COUNTS)[number])
+          ) {
+            setPackCount(command.count);
+          }
+          break;
+        case "openPack":
+          startPacks(browseSkin);
+          break;
+        case "backToPacks":
+          backToSelect();
+          break;
+        case "advance":
+          if (phase === "tear") handleTorn();
+          else if (phase === "reveal") controls.current.revealNext?.();
+          break;
+        case "showAll":
+          if (phase === "reveal") handleAllRevealed();
+          break;
+        case "savePulls":
+          requestSave();
+          break;
+        case "uploadArtwork": {
+          if (!layout) break;
+          const image = new Image();
+          image.onload = () => {
+            try {
+              const next = composeSkinFromImage(image, layout, command.label);
+              setUploads((previous) => [...previous, next]);
+              setBrowseSkin(next);
+              setUploadError(null);
+            } catch (error) {
+              setUploadError(
+                error instanceof Error
+                  ? error.message
+                  : "could not read that image",
+              );
+            }
+          };
+          image.onerror = () => setUploadError("could not read that image");
+          image.src = command.dataURL;
+          break;
+        }
+      }
+    };
+
+    window.addEventListener("tcger-pack-command", handleCommand);
+    return () =>
+      window.removeEventListener("tcger-pack-command", handleCommand);
+  }, [
+    backToSelect,
+    browseSkin,
+    handleAllRevealed,
+    handleTorn,
+    layout,
+    nativeControls,
+    phase,
+    requestSave,
+    skins,
+    startPacks,
+  ]);
+
+  useEffect(() => {
+    if (!nativeControls) return;
+    onEvent?.({
+      type: "nativeState",
+      state: {
+        phase,
+        selectedPackID: (phase === "select" ? browseSkin : skin).id,
+        selectedPackLabel: (phase === "select" ? browseSkin : skin).label,
+        packCount,
+        packOptions: skins.map(({ id, label }) => ({ id, label })),
+        revealedCount,
+        totalCards: currentPack?.length ?? 0,
+        currentPackNumber: packs.length > 0 ? packIndex + 1 : 0,
+        totalPacks: packs.length,
+        canSave: Boolean(
+          completionActionLabel && (phase === "summary" || phase === "final"),
+        ),
+        warning: artworkWarning ?? uploadError ?? undefined,
+        // Native image loading has a separate cache from WKWebView. Share the
+        // pulls as soon as a pack exists so iOS can prefetch thumbnails while
+        // the user is tearing and revealing, before the result grid appears.
+        session: phase === "select" ? undefined : completedSession,
+      },
+    });
+  }, [
+    artworkWarning,
+    browseSkin,
+    completionActionLabel,
+    completedSession,
+    currentPack?.length,
+    nativeControls,
+    onEvent,
+    packCount,
+    packIndex,
+    packs.length,
+    phase,
+    revealedCount,
+    skin,
+    skins,
+    uploadError,
+  ]);
 
   return (
     <div
@@ -403,6 +547,14 @@ export function PackOpening({
           }}
         />
       )}
+      {artworkWarning && !nativeControls && (
+        <p
+          role="status"
+          className="pointer-events-none absolute left-1/2 top-16 z-20 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-amber-500/40 bg-background/90 px-3 py-1.5 text-center text-xs font-medium text-foreground shadow-sm backdrop-blur"
+        >
+          {artworkWarning}
+        </p>
+      )}
       <style>{`
         @keyframes pack-flash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
         @keyframes pack-card-in {
@@ -413,7 +565,8 @@ export function PackOpening({
 
       {/* back out of an opening without the HUD — the bottom offsets keep the
           overlays clear of the fixed mobile nav, like the shell's pb-16 md:pb-0 */}
-      {!showHud &&
+      {!nativeControls &&
+        !showHud &&
         (phase === "tear" || phase === "opening" || phase === "reveal") && (
           <button
             type="button"
@@ -425,7 +578,7 @@ export function PackOpening({
         )}
 
       {/* phase hint */}
-      {PHASE_HINTS[phase] && (
+      {!nativeControls && PHASE_HINTS[phase] && (
         <p
           className={cn(
             "pointer-events-none absolute left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-border bg-background/85 px-3 py-1.5 text-center text-xs font-medium text-muted-foreground shadow-sm backdrop-blur sm:text-sm",
@@ -442,7 +595,7 @@ export function PackOpening({
         </p>
       )}
 
-      {(phase === "tear" || phase === "reveal") && (
+      {!nativeControls && (phase === "tear" || phase === "reveal") && (
         <div className="absolute inset-x-3 bottom-5 z-10 flex flex-wrap justify-center gap-2">
           <button
             ref={primaryActionRef}
@@ -489,7 +642,7 @@ export function PackOpening({
       </p>
 
       {/* texture + pack count pickers on select screen */}
-      {phase === "select" && (
+      {!nativeControls && phase === "select" && (
         <div className="absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2 rounded-xl border border-border bg-background/90 p-2 shadow-lg backdrop-blur sm:bottom-10">
           <div className="flex w-full max-w-full gap-1.5 overflow-x-auto pb-0.5 sm:gap-2 sm:pb-1">
             {skins.map((s) => {
@@ -583,7 +736,7 @@ export function PackOpening({
       )}
 
       {/* single-pack summary */}
-      {phase === "summary" && currentPack && (
+      {!nativeControls && phase === "summary" && currentPack && (
         <div className="absolute inset-0 flex flex-col items-center justify-start gap-6 overflow-y-auto p-6 pb-24 md:justify-center md:pb-6">
           <h2
             ref={resultsHeadingRef}
@@ -597,31 +750,33 @@ export function PackOpening({
               <PackResultCard key={card.id} card={card} index={i} />
             ))}
           </div>
-          <div className="flex flex-wrap justify-center gap-2">
-            {completionActionLabel && (
+          {!nativeControls && (
+            <div className="flex flex-wrap justify-center gap-2">
+              {completionActionLabel && (
+                <button
+                  ref={primaryActionRef}
+                  type="button"
+                  onClick={requestSave}
+                  className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+                >
+                  {completionActionLabel}
+                </button>
+              )}
               <button
-                ref={primaryActionRef}
+                ref={completionActionLabel ? undefined : primaryActionRef}
                 type="button"
-                onClick={requestSave}
-                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+                onClick={backToSelect}
+                className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted"
               >
-                {completionActionLabel}
+                Open more packs
               </button>
-            )}
-            <button
-              ref={completionActionLabel ? undefined : primaryActionRef}
-              type="button"
-              onClick={backToSelect}
-              className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted"
-            >
-              Open more packs
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* combined results across all packs */}
-      {phase === "final" && (
+      {!nativeControls && phase === "final" && (
         <div className="absolute inset-0 flex flex-col items-center gap-6 overflow-y-auto p-6 pb-24 md:pb-6">
           <h2
             ref={resultsHeadingRef}
@@ -673,26 +828,28 @@ export function PackOpening({
               </div>
             </section>
           ))}
-          <div className="mb-4 flex flex-wrap justify-center gap-2">
-            {completionActionLabel && (
+          {!nativeControls && (
+            <div className="mb-4 flex flex-wrap justify-center gap-2">
+              {completionActionLabel && (
+                <button
+                  ref={primaryActionRef}
+                  type="button"
+                  onClick={requestSave}
+                  className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+                >
+                  {completionActionLabel}
+                </button>
+              )}
               <button
-                ref={primaryActionRef}
+                ref={completionActionLabel ? undefined : primaryActionRef}
                 type="button"
-                onClick={requestSave}
-                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+                onClick={backToSelect}
+                className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted"
               >
-                {completionActionLabel}
+                Open more packs
               </button>
-            )}
-            <button
-              ref={completionActionLabel ? undefined : primaryActionRef}
-              type="button"
-              onClick={backToSelect}
-              className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted"
-            >
-              Open more packs
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       )}
 

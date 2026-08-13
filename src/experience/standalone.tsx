@@ -1,11 +1,14 @@
 import { createRoot } from "react-dom/client";
 
 import { PackOpening } from "./pack-opening";
-import type { PackOpeningEvent } from "./types";
+import type { PackOpeningEvent, PackOpeningNativeCommand } from "./types";
 
 declare global {
   interface Window {
-    tcgerPack?: { destroy: () => void };
+    tcgerPack?: {
+      destroy: () => void;
+      command: (command: PackOpeningNativeCommand) => void;
+    };
     webkit?: {
       messageHandlers?: {
         packBridge?: { postMessage: (event: PackOpeningEvent) => void };
@@ -40,11 +43,22 @@ root.render(
   <PackOpening
     // The iOS scheme handler proxies this host to the same R2 manifest used by
     // the website and falls back to PackOpening.bundle when offline.
-    assetBase={window.location.protocol === "tcger-pack:" ? "tcger-pack://assets" : ""}
+    assetBase={
+      window.location.protocol === "tcger-pack:" ? "tcger-pack://assets" : ""
+    }
     embedded
+    nativeControls={isNativeHost}
     completionActionLabel={isNativeHost ? "Save pulls" : undefined}
     onEvent={emit}
   />,
 );
 
-window.tcgerPack = { destroy: () => root.unmount() };
+window.tcgerPack = {
+  destroy: () => root.unmount(),
+  command: (command) =>
+    window.dispatchEvent(
+      new CustomEvent<PackOpeningNativeCommand>("tcger-pack-command", {
+        detail: command,
+      }),
+    ),
+};

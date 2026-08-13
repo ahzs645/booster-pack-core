@@ -11,11 +11,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
-import {
-  tierRank,
-  type PackVariant,
-  type PulledCard,
-} from "./pack-data";
+import { tierRank, type PackVariant, type PulledCard } from "./pack-data";
 import { PACK_H, PACK_W, packGeometry } from "./pack-mesh";
 import { paintVariantSheet } from "./pack-sheet";
 import type { PackOpeningPhase as PackPhase } from "./types";
@@ -123,7 +119,10 @@ function buildCutSet(geometry: THREE.BufferGeometry, cutFn: CutFn): SplitMesh {
  * +Z, because the seam runs around the wrap's sides as well as across its face,
  * and a flat Z offset would bury it in the gussets.
  */
-function seamRibbonGeometry(seam: Float32Array, side: 1 | -1): THREE.BufferGeometry {
+function seamRibbonGeometry(
+  seam: Float32Array,
+  side: 1 | -1,
+): THREE.BufferGeometry {
   const width = 0.06 * (PACK_H / 3.3);
   const lift = 0.012;
   const out: number[] = [];
@@ -183,7 +182,8 @@ function makeWrinkleNormalTexture(): THREE.DataTexture {
     }
   }
   // fine crinkle
-  for (let i = 0; i < height.length; i++) height[i] += (Math.random() - 0.5) * 0.3;
+  for (let i = 0; i < height.length; i++)
+    height[i] += (Math.random() - 0.5) * 0.3;
 
   const data = new Uint8Array(w * h * 4);
   const strength = 1.6;
@@ -539,8 +539,7 @@ export function PackCarousel({
           st.angle = st.goto;
           st.goto = null;
         } else {
-          st.angle =
-            Math.round(st.angle / CAROUSEL_STEP) * CAROUSEL_STEP;
+          st.angle = Math.round(st.angle / CAROUSEL_STEP) * CAROUSEL_STEP;
         }
         st.vel = 0;
       } else {
@@ -633,7 +632,11 @@ export function PackCarousel({
           <mesh geometry={pack.geometry}>
             <FoilMaterial map={textures.sheet} normalMap={normalTex} />
           </mesh>
-          <mesh geometry={pack.geometry} scale={1.002} material={textures.sheen} />
+          <mesh
+            geometry={pack.geometry}
+            scale={1.002}
+            material={textures.sheen}
+          />
           {/* floor reflection */}
           <mesh
             geometry={pack.geometry}
@@ -671,6 +674,15 @@ export function PackExperience({
   onFlash,
 }: PackExperienceProps) {
   const stackCount = Math.min(packCount, 10);
+  const viewport = useThree((state) => state.viewport);
+  // Leave the reveal card clear of phone-sized host controls. The old fixed
+  // 1.12 scale nearly filled a portrait canvas, so native top/bottom overlays
+  // appeared to crop the scan even though the WebGL scene itself was intact.
+  const revealScale = THREE.MathUtils.clamp(
+    (viewport.width * 0.72) / CARD_W,
+    0.76,
+    1.05,
+  );
   // bulk stacks sit lower so the upward cascade stays in frame
   const packBaseY = stackCount > 1 ? -0.55 : 0;
   const [cutGeos, setCutGeos] = useState<SplitMesh | null>(null);
@@ -971,12 +983,7 @@ export function PackExperience({
       ) as THREE.BufferAttribute;
       for (let i = 0; i < tear.path.length; i++) {
         const p = tear.path[i];
-        posAttr.setXYZ(
-          i,
-          p.x,
-          p.y,
-          pack.faceZ + 0.05,
-        );
+        posAttr.setXYZ(i, p.x, p.y, pack.faceZ + 0.05);
       }
       posAttr.needsUpdate = true;
       tearTrail.geometry.setDrawRange(0, tear.path.length);
@@ -987,11 +994,7 @@ export function PackExperience({
       const last = tear.path[tear.path.length - 1];
       tearHeadRef.current.visible = trailVisible && !!last;
       if (last) {
-        tearHeadRef.current.position.set(
-          last.x,
-          last.y,
-          pack.faceZ + 0.06,
-        );
+        tearHeadRef.current.position.set(last.x, last.y, pack.faceZ + 0.06);
       }
       const s = 0.3 + tear.progress * 0.5 + Math.sin(t * 20) * 0.05;
       tearHeadRef.current.scale.setScalar(s);
@@ -1000,9 +1003,7 @@ export function PackExperience({
     // --- opening timeline ----------------------------------------------------
     if (phase === "opening") {
       const duration = 1.7 + (stackCount - 1) * 0.12;
-      a.openT = reducedMotion
-        ? 1
-        : Math.min(1, a.openT + dt / duration);
+      a.openT = reducedMotion ? 1 : Math.min(1, a.openT + dt / duration);
       const T = a.openT * (duration / 1.7); // in single-pack time units
 
       if (packRef.current) {
@@ -1049,7 +1050,7 @@ export function PackExperience({
       if (stackRef.current) {
         stackRef.current.position.y = -0.15 + rise * 0.15;
         stackRef.current.position.z = rise * 0.9;
-        const sc = 0.92 + rise * 0.2;
+        const sc = THREE.MathUtils.lerp(0.92, revealScale, rise);
         stackRef.current.scale.setScalar(sc);
       }
       if (T >= 1 && !a.openedNotified) {
@@ -1093,6 +1094,9 @@ export function PackExperience({
       if (stackRef.current) {
         const shake =
           charging && !reducedMotion ? Math.sin(t * 55) * 0.02 * a.charge.t : 0;
+        stackRef.current.scale.setScalar(
+          THREE.MathUtils.damp(stackRef.current.scale.x, revealScale, 7, dt),
+        );
         stackRef.current.rotation.y = THREE.MathUtils.damp(
           stackRef.current.rotation.y,
           reducedMotion ? 0 : pointer.x * 0.4,
@@ -1146,7 +1150,8 @@ export function PackExperience({
       );
     }
     sheenMat.uniforms.uTime.value = reducedMotion ? 0 : t;
-    sheenMat.uniforms.uOpacity.value = wrapperMaterials.current[0]?.opacity ?? 1;
+    sheenMat.uniforms.uOpacity.value =
+      wrapperMaterials.current[0]?.opacity ?? 1;
   });
 
   const cardsVisible = phase !== "summary" && phase !== "final";
@@ -1156,7 +1161,11 @@ export function PackExperience({
       <FoilEnvironment />
       <ambientLight intensity={0.55} />
       <directionalLight position={[3, 5, 6]} intensity={1.0} />
-      <directionalLight position={[-4, -2, 4]} intensity={0.35} color="#8fb7ff" />
+      <directionalLight
+        position={[-4, -2, 4]}
+        intensity={0.35}
+        color="#8fb7ff"
+      />
 
       {/* charge glow behind the stack */}
       <sprite ref={chargeGlowRef} position={[0, 0, 0.3]} visible={false}>
@@ -1227,57 +1236,18 @@ export function PackExperience({
               ]}
             >
               <group position={[0, PACK_H / 2, 0]}>
-              {/* Below the tear: what stays in your hand. Until there is a cut
+                {/* Below the tear: what stays in your hand. Until there is a cut
                   the whole shell lives here, so a sealed pack is one mesh and
                   there is no seam to see. */}
-              <group
-                ref={(g) => {
-                  bodyRefs.current[i] = g;
-                }}
-              >
-                <mesh
-                  geometry={cutGeos ? cutGeos.below : pack.geometry}
-                  renderOrder={5}
+                <group
+                  ref={(g) => {
+                    bodyRefs.current[i] = g;
+                  }}
                 >
-                  <FoilMaterial
-                    map={sheetTex}
-                    normalMap={normalTex}
-                    materialRef={registerWrapperMaterial}
-                    dim={i !== 0}
-                    doubleSide
-                  />
-                </mesh>
-                {i === 0 && (
                   <mesh
                     geometry={cutGeos ? cutGeos.below : pack.geometry}
-                    renderOrder={6}
-                    scale={1.002}
-                    material={sheenMat}
-                  />
-                )}
-                {i === 0 && seamGeos && (
-                  <mesh geometry={seamGeos.below} renderOrder={7}>
-                    <meshBasicMaterial
-                      ref={edgeBodyMatRef}
-                      color="#bffcff"
-                      transparent
-                      opacity={0}
-                      blending={THREE.AdditiveBlending}
-                      depthWrite={false}
-                      side={THREE.DoubleSide}
-                    />
-                  </mesh>
-                )}
-              </group>
-
-              {/* Above the tear: the strip that shears away. */}
-              <group
-                ref={(g) => {
-                  stripRefs.current[i] = g;
-                }}
-              >
-                {cutGeos && (
-                  <mesh geometry={cutGeos.above} renderOrder={5}>
+                    renderOrder={5}
+                  >
                     <FoilMaterial
                       map={sheetTex}
                       normalMap={normalTex}
@@ -1286,28 +1256,67 @@ export function PackExperience({
                       doubleSide
                     />
                   </mesh>
-                )}
-                {i === 0 && cutGeos && (
-                  <mesh
-                    geometry={cutGeos.above}
-                    renderOrder={6}
-                    scale={1.002}
-                    material={sheenMat}
-                  />
-                )}
-                {i === 0 && seamGeos && (
-                  <mesh geometry={seamGeos.above} renderOrder={7}>
-                    <meshBasicMaterial
-                      ref={edgeStripMatRef}
-                      color="#bffcff"
-                      transparent
-                      opacity={0}
-                      blending={THREE.AdditiveBlending}
-                      depthWrite={false}
-                      side={THREE.DoubleSide}
+                  {i === 0 && (
+                    <mesh
+                      geometry={cutGeos ? cutGeos.below : pack.geometry}
+                      renderOrder={6}
+                      scale={1.002}
+                      material={sheenMat}
                     />
-                  </mesh>
-                )}
+                  )}
+                  {i === 0 && seamGeos && (
+                    <mesh geometry={seamGeos.below} renderOrder={7}>
+                      <meshBasicMaterial
+                        ref={edgeBodyMatRef}
+                        color="#bffcff"
+                        transparent
+                        opacity={0}
+                        blending={THREE.AdditiveBlending}
+                        depthWrite={false}
+                        side={THREE.DoubleSide}
+                      />
+                    </mesh>
+                  )}
+                </group>
+
+                {/* Above the tear: the strip that shears away. */}
+                <group
+                  ref={(g) => {
+                    stripRefs.current[i] = g;
+                  }}
+                >
+                  {cutGeos && (
+                    <mesh geometry={cutGeos.above} renderOrder={5}>
+                      <FoilMaterial
+                        map={sheetTex}
+                        normalMap={normalTex}
+                        materialRef={registerWrapperMaterial}
+                        dim={i !== 0}
+                        doubleSide
+                      />
+                    </mesh>
+                  )}
+                  {i === 0 && cutGeos && (
+                    <mesh
+                      geometry={cutGeos.above}
+                      renderOrder={6}
+                      scale={1.002}
+                      material={sheenMat}
+                    />
+                  )}
+                  {i === 0 && seamGeos && (
+                    <mesh geometry={seamGeos.above} renderOrder={7}>
+                      <meshBasicMaterial
+                        ref={edgeStripMatRef}
+                        color="#bffcff"
+                        transparent
+                        opacity={0}
+                        blending={THREE.AdditiveBlending}
+                        depthWrite={false}
+                        side={THREE.DoubleSide}
+                      />
+                    </mesh>
+                  )}
                 </group>
               </group>
             </group>
@@ -1326,7 +1335,11 @@ export function PackExperience({
               </mesh>
               <primitive object={tearTrail} />
               <primitive object={tearTrailPoints} />
-              <sprite ref={tearHeadRef} position={[0, TEAR_Y, 0.32]} visible={false}>
+              <sprite
+                ref={tearHeadRef}
+                position={[0, TEAR_Y, 0.32]}
+                visible={false}
+              >
                 <spriteMaterial
                   map={glowTex}
                   color={accentColor}
