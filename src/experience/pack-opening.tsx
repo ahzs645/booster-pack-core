@@ -626,6 +626,7 @@ export function PackOpening({
                 // wrapper; Quick skips directly to the grouped results.
                 packCount={Math.max(1, packs.length - packIndex)}
                 backwards={packBackwards}
+                nativeLayout={nativeControls}
                 phase={phase}
                 controls={controls}
                 onTorn={handleTorn}

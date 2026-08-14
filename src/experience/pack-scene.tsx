@@ -2,7 +2,6 @@
 
 import {
   useFrame,
-  useLoader,
   useThree,
   type ThreeEvent,
 } from "@react-three/fiber";
@@ -43,6 +42,8 @@ interface PackExperienceProps {
   packCount: number;
   /** Keeps the deliberately flipped carousel orientation through the tear. */
   backwards?: boolean;
+  /** Leaves extra breathing room around cards beneath native host controls. */
+  nativeLayout?: boolean;
   phase: PackPhase;
   controls: React.MutableRefObject<PackSceneControls>;
   onTorn: () => void;
@@ -475,6 +476,67 @@ interface LoadedCardStackProps {
   onPointerDown: (event: ThreeEvent<PointerEvent>) => void;
 }
 
+function rendererAssetURL(url: string): string {
+  if (
+    globalThis.location?.protocol !== "tcger-pack:" ||
+    !url.startsWith("https://")
+  ) {
+    return url;
+  }
+  // Keep textures on the document's custom-scheme origin. WebKit applies
+  // origin checks to different hosts even when one scheme handler owns both.
+  return `tcger-pack://assets/remote-image?url=${encodeURIComponent(url)}`;
+}
+
+function makeCardCanvasTexture(
+  title: string,
+  subtitle: string,
+  detail: string,
+): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 630;
+  canvas.height = 880;
+  const context = canvas.getContext("2d")!;
+  const gradient = context.createLinearGradient(0, 0, 630, 880);
+  gradient.addColorStop(0, "#172554");
+  gradient.addColorStop(0.52, "#312e81");
+  gradient.addColorStop(1, "#111827");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 630, 880);
+  context.strokeStyle = "rgba(255,255,255,0.45)";
+  context.lineWidth = 10;
+  context.strokeRect(28, 28, 574, 824);
+  context.fillStyle = "rgba(255,255,255,0.12)";
+  context.beginPath();
+  context.arc(315, 345, 122, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = "white";
+  context.textAlign = "center";
+  context.font = "700 42px system-ui, sans-serif";
+  context.fillText(title.slice(0, 23), 315, 610);
+  context.font = "600 27px system-ui, sans-serif";
+  context.fillStyle = "rgba(255,255,255,0.78)";
+  context.fillText(subtitle, 315, 662);
+  context.font = "500 23px system-ui, sans-serif";
+  context.fillStyle = "rgba(255,255,255,0.62)";
+  context.fillText(detail, 315, 756);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function makeOfflineCardTexture(card: PulledCard): THREE.Texture {
+  return makeCardCanvasTexture(
+    card.name,
+    `${card.setName} · ${card.localId}`,
+    "Artwork unavailable offline",
+  );
+}
+
+function makeGenericCardBackTexture(): THREE.Texture {
+  return makeCardCanvasTexture("TCGer", "Trading Card", "Card back");
+}
+
 /**
  * Card artwork is intentionally isolated behind its own Suspense boundary.
  * Loading remote scans must never suspend the sealed wrapper that is already
@@ -489,28 +551,68 @@ function LoadedCardStack({
   readyRef,
   onPointerDown,
 }: LoadedCardStackProps) {
-  const frontTextures = useLoader(
-    THREE.TextureLoader,
-    cards.map((card) => card.imageUrl),
+  const [frontTextures, setFrontTextures] = useState<THREE.Texture[] | null>(
+    null,
   );
-  const backTexture = useLoader(
-    THREE.TextureLoader,
-    `${assetBase.replace(/\/$/, "")}/pack/card-backs/pokemon.png`,
-  );
+  const [backTexture, setBackTexture] = useState<THREE.Texture | null>(null);
   const cardGeometry = useMemo(() => makeRoundedCardGeometry(), []);
 
   useEffect(() => {
-    for (const texture of [...frontTextures, backTexture]) {
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = 8;
-      texture.needsUpdate = true;
-    }
-    readyRef.current = true;
+    let live = true;
+    readyRef.current = false;
+    const loader = new THREE.TextureLoader();
+    const load = (url: string, fallback: () => THREE.Texture) =>
+      new Promise<THREE.Texture>((resolve) => {
+        loader.load(
+          rendererAssetURL(url),
+          resolve,
+          undefined,
+          () => resolve(fallback()),
+        );
+      });
+
+    const fronts = cards.map((card) =>
+      load(card.imageUrl, () => makeOfflineCardTexture(card)),
+    );
+    const back = load(
+      `${assetBase.replace(/\/$/, "")}/pack/card-backs/pokemon.png`,
+      makeGenericCardBackTexture,
+    );
+
+    void Promise.all([Promise.all(fronts), back]).then(
+      ([loadedFronts, loadedBack]) => {
+        const textures = [...loadedFronts, loadedBack];
+        if (!live) {
+          textures.forEach((texture) => texture.dispose());
+          return;
+        }
+        for (const texture of textures) {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.anisotropy = 8;
+          texture.needsUpdate = true;
+        }
+        setFrontTextures(loadedFronts);
+        setBackTexture(loadedBack);
+        readyRef.current = true;
+      },
+    );
+
     return () => {
+      live = false;
       readyRef.current = false;
-      cardGeometry.dispose();
     };
-  }, [backTexture, cardGeometry, frontTextures, readyRef]);
+  }, [assetBase, cards, readyRef]);
+
+  useEffect(() => () => cardGeometry.dispose(), [cardGeometry]);
+  useEffect(
+    () => () => {
+      frontTextures?.forEach((texture) => texture.dispose());
+      backTexture?.dispose();
+    },
+    [backTexture, frontTextures],
+  );
+
+  if (!frontTextures || !backTexture) return null;
 
   return (
     <group
@@ -896,6 +998,7 @@ export function PackExperience({
   sheet,
   packCount,
   backwards = false,
+  nativeLayout = false,
   phase,
   controls,
   onTorn,
@@ -913,9 +1016,9 @@ export function PackExperience({
   // 1.12 scale nearly filled a portrait canvas, so native top/bottom overlays
   // appeared to crop the scan even though the WebGL scene itself was intact.
   const revealScale = THREE.MathUtils.clamp(
-    (viewport.width * 0.72) / CARD_W,
-    0.76,
-    1.05,
+    (viewport.width * (nativeLayout ? 0.66 : 0.72)) / CARD_W,
+    nativeLayout ? 0.72 : 0.76,
+    nativeLayout ? 0.98 : 1.05,
   );
   // bulk stacks sit lower so the upward cascade stays in frame
   const packBaseY = openingPackBaseY(compact, stackCount);

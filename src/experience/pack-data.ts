@@ -21,19 +21,12 @@ export interface PulledCard extends PackCard {
 
 const EVOLVING_SKIES_IMAGE_ROOT = "https://assets.tcgdex.net/en/swsh/swsh7";
 const BASE_SET_IMAGE_ROOT = "https://assets.tcgdex.net/en/base/base1";
-const PITCH_BLACK_IMAGE_ROOT = "https://images.pokemoncard.io/images/me5";
+const PITCH_BLACK_IMAGE_ROOT = "https://assets.tcgdex.net/en/me/me05";
 
 export function packCardImageUrls(card: PackCard): {
   imageUrl: string;
   imageUrlSmall: string;
 } {
-  if (card.imageSource === "pokemoncard") {
-    const file = `${card.setCode}-${card.localId}`;
-    return {
-      imageUrl: `${card.imageRoot}/${file}_hiresopt.jpg`,
-      imageUrlSmall: `${card.imageRoot}/${file}.png`,
-    };
-  }
   return {
     imageUrl: `${card.imageRoot}/${card.localId}/high.webp`,
     imageUrlSmall: `${card.imageRoot}/${card.localId}/low.webp`,
@@ -46,15 +39,14 @@ function pitchBlackCards(
   rows: Array<[string, string]>,
 ): PackCard[] {
   return rows.map(([localId, name]) => ({
-    id: `me5-${localId}`,
+    id: `me05-${localId.padStart(3, "0")}`,
     name,
     rarity,
     tier,
-    localId,
+    localId: localId.padStart(3, "0"),
     imageRoot: PITCH_BLACK_IMAGE_ROOT,
-    imageSource: "pokemoncard" as const,
     tcg: "pokemon" as const,
-    setCode: "me5",
+    setCode: "me05",
     setName: "Pitch Black",
   }));
 }
@@ -263,7 +255,7 @@ export const BASE_SET_POOL: Record<PackRarityTier, PackCard[]> = {
 /**
  * Curated English Pitch Black (ME5) pool. Its wrapper advertises ten cards, so
  * generation below follows a six-common, three-uncommon, one-rare-or-better
- * recipe and uses the current ME5 scans supplied by PokemonCard.
+ * recipe and uses TCGdex's cacheable ME05 scans.
  */
 export const PITCH_BLACK_POOL: Record<PackRarityTier, PackCard[]> = {
   common: pitchBlackCards("Common", "common", [
