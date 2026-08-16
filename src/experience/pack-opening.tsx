@@ -271,26 +271,6 @@ export function PackOpening({
     onEvent?.({ type: "haptic", style: "success" });
     setPhase("final");
   }, [onEvent]);
-  const inspectCard = useCallback(
-    (card: PulledCard) => {
-      onEvent?.({
-        type: "inspectRequested",
-        pull: {
-          cardId: card.id,
-          name: card.name,
-          rarity: card.rarity,
-          tier: card.tier,
-          collectorNumber: card.localId,
-          tcg: card.tcg,
-          setCode: card.setCode,
-          setName: card.setName,
-          imageUrl: card.imageUrl,
-          imageUrlSmall: card.imageUrlSmall,
-        },
-      });
-    },
-    [onEvent],
-  );
   const handleFlash = useCallback(() => {
     onEvent?.({ type: "haptic", style: "selection" });
     setFlashKey((k) => k + 1);
@@ -640,7 +620,6 @@ export function PackOpening({
                 onTorn={handleTorn}
                 onOpened={handleOpened}
                 onReveal={handleReveal}
-                onInspect={inspectCard}
                 onAllRevealed={handleAllRevealed}
                 onFlash={handleFlash}
               />

@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  useFrame,
-  useThree,
-  type ThreeEvent,
-} from "@react-three/fiber";
+import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { splitGeometryByCut, type CutFn, type SplitMesh } from "../index";
 import {
   Suspense,
@@ -49,7 +45,6 @@ interface PackExperienceProps {
   onTorn: () => void;
   onOpened: () => void;
   onReveal: (revealedCount: number) => void;
-  onInspect: (card: PulledCard) => void;
   onAllRevealed: () => void;
   onFlash: () => void;
 }
@@ -82,13 +77,28 @@ function makeRoundedCardGeometry(): THREE.ShapeGeometry {
 
   shape.moveTo(-halfWidth + radius, -halfHeight);
   shape.lineTo(halfWidth - radius, -halfHeight);
-  shape.quadraticCurveTo(halfWidth, -halfHeight, halfWidth, -halfHeight + radius);
+  shape.quadraticCurveTo(
+    halfWidth,
+    -halfHeight,
+    halfWidth,
+    -halfHeight + radius,
+  );
   shape.lineTo(halfWidth, halfHeight - radius);
   shape.quadraticCurveTo(halfWidth, halfHeight, halfWidth - radius, halfHeight);
   shape.lineTo(-halfWidth + radius, halfHeight);
-  shape.quadraticCurveTo(-halfWidth, halfHeight, -halfWidth, halfHeight - radius);
+  shape.quadraticCurveTo(
+    -halfWidth,
+    halfHeight,
+    -halfWidth,
+    halfHeight - radius,
+  );
   shape.lineTo(-halfWidth, -halfHeight + radius);
-  shape.quadraticCurveTo(-halfWidth, -halfHeight, -halfWidth + radius, -halfHeight);
+  shape.quadraticCurveTo(
+    -halfWidth,
+    -halfHeight,
+    -halfWidth + radius,
+    -halfHeight,
+  );
 
   const geometry = new THREE.ShapeGeometry(shape, 8);
   const positions = geometry.getAttribute("position");
@@ -440,10 +450,7 @@ const TWO_PI = Math.PI * 2;
 
 function openingPackScale(viewportWidth: number, viewportHeight: number) {
   return THREE.MathUtils.clamp(
-    Math.min(
-      (viewportWidth * 0.78) / PACK_W,
-      (viewportHeight * 0.68) / PACK_H,
-    ),
+    Math.min((viewportWidth * 0.78) / PACK_W, (viewportHeight * 0.68) / PACK_H),
     0.72,
     1,
   );
@@ -563,11 +570,8 @@ function LoadedCardStack({
     const loader = new THREE.TextureLoader();
     const load = (url: string, fallback: () => THREE.Texture) =>
       new Promise<THREE.Texture>((resolve) => {
-        loader.load(
-          rendererAssetURL(url),
-          resolve,
-          undefined,
-          () => resolve(fallback()),
+        loader.load(rendererAssetURL(url), resolve, undefined, () =>
+          resolve(fallback()),
         );
       });
 
@@ -1004,7 +1008,6 @@ export function PackExperience({
   onTorn,
   onOpened,
   onReveal,
-  onInspect,
   onAllRevealed,
   onFlash,
 }: PackExperienceProps) {
@@ -1114,9 +1117,15 @@ export function PackExperience({
     openT: 0,
     openedNotified: false,
     topIndex: 0,
+    maxRevealedIndex: 0,
     charge: { t: 0, done: false },
     dismiss: new Map<number, { t: number; dir: number }>(),
     allNotified: false,
+    cardSwipe: {
+      active: false,
+      startX: 0,
+      startY: 0,
+    },
     tear: {
       active: false,
       startX: 0,
@@ -1195,8 +1204,31 @@ export function PackExperience({
     a.dismiss.set(idx, { t: 0, dir: idx % 2 === 0 ? 1 : -1 });
     a.topIndex = idx + 1;
     a.charge = { t: 0, done: false };
-    if (a.topIndex < cards.length) onReveal(a.topIndex + 1);
+    if (a.topIndex < cards.length && a.topIndex > a.maxRevealedIndex) {
+      a.maxRevealedIndex = a.topIndex;
+      onReveal(a.maxRevealedIndex + 1);
+    }
   }, [cards, controls, onFlash, onReveal, phase]);
+
+  const revealPrevious = useCallback(() => {
+    if (phase !== "reveal") return;
+    const a = anim.current;
+    const previousIndex = a.topIndex - 1;
+    if (previousIndex < 0) return;
+
+    const previousCard = cardRefs.current[previousIndex];
+    if (!previousCard) return;
+
+    a.dismiss.delete(previousIndex);
+    previousCard.visible = true;
+    previousCard.position.set(0, 0, -previousIndex * 0.012);
+    previousCard.rotation.set(0, 0, 0);
+    previousCard.scale.setScalar(1);
+    a.topIndex = previousIndex;
+    // Previously seen chase cards should return immediately without replaying
+    // their first-reveal charge animation.
+    a.charge = { t: 1, done: true };
+  }, [phase]);
 
   useEffect(() => {
     controls.current.revealNext = revealNext;
@@ -1207,11 +1239,42 @@ export function PackExperience({
     };
   }, [controls, revealNext]);
 
-  const handleStackClick = (e: ThreeEvent<PointerEvent>) => {
+  const handleStackPointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (phase !== "reveal") return;
     e.stopPropagation();
-    const card = cards[anim.current.topIndex];
-    if (phase === "reveal" && card) onInspect(card);
+    anim.current.cardSwipe = {
+      active: true,
+      startX: e.nativeEvent.clientX,
+      startY: e.nativeEvent.clientY,
+    };
   };
+
+  useEffect(() => {
+    const finishCardSwipe = (event: PointerEvent) => {
+      const swipe = anim.current.cardSwipe;
+      if (!swipe.active) return;
+      swipe.active = false;
+
+      const deltaX = event.clientX - swipe.startX;
+      const deltaY = event.clientY - swipe.startY;
+      if (Math.abs(deltaX) < 44 || Math.abs(deltaX) <= Math.abs(deltaY)) {
+        return;
+      }
+
+      if (deltaX < 0) revealNext();
+      else revealPrevious();
+    };
+    const cancelCardSwipe = () => {
+      anim.current.cardSwipe.active = false;
+    };
+
+    window.addEventListener("pointerup", finishCardSwipe);
+    window.addEventListener("pointercancel", cancelCardSwipe);
+    return () => {
+      window.removeEventListener("pointerup", finishCardSwipe);
+      window.removeEventListener("pointercancel", cancelCardSwipe);
+    };
+  }, [revealNext, revealPrevious]);
 
   useFrame((state, rawDelta) => {
     const reducedMotion = controls.current.reducedMotion;
@@ -1257,7 +1320,9 @@ export function PackExperience({
         pack.rotation.x = 0;
         pack.rotation.z = 0;
         pack.rotation.y = reducedMotion
-          ? backwards ? Math.PI : 0
+          ? backwards
+            ? Math.PI
+            : 0
           : THREE.MathUtils.damp(
               pack.rotation.y,
               backwards ? Math.PI : 0,
@@ -1483,7 +1548,7 @@ export function PackExperience({
             stackRef={stackRef}
             cardRefs={cardRefs}
             readyRef={cardAssetsReadyRef}
-            onPointerDown={handleStackClick}
+            onPointerDown={handleStackPointerDown}
           />
         </Suspense>
       )}
@@ -1491,11 +1556,7 @@ export function PackExperience({
       {/* booster pack stack — bulk opens cascade upward so every pack peeks
           out above the one in front, like the reference app */}
       {cardsVisible && (
-        <group
-          ref={packRef}
-          position={[0, packBaseY, 0]}
-          scale={packScale}
-        >
+        <group ref={packRef} position={[0, packBaseY, 0]} scale={packScale}>
           {Array.from({ length: stackCount }).map((_, i) => (
             // all packs upright and parallel, each directly behind the one in
             // front, peeking above it — reference-app stack
