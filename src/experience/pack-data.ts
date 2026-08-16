@@ -19,6 +19,44 @@ export interface PulledCard extends PackCard {
   imageUrlSmall: string;
 }
 
+export interface PackOddsReference {
+  title: string;
+  url: string;
+  sampleSize: number;
+  note: string;
+}
+
+/**
+ * Public provenance for every probability model used by the simulator.
+ * Physical Pokémon pull rates are not published officially, so these models
+ * cite the empirical observations they are based on and disclose where the
+ * simulator simplifies real-world collation.
+ */
+export const PACK_ODDS_REFERENCES: Record<string, PackOddsReference> = {
+  swsh7: {
+    title: "Evolving Skies community pull data",
+    url: "https://www.reddit.com/r/PokemonTCG/comments/paitho/evolving_skies_pull_data_from_10000_packs_opened/",
+    sampleSize: 11_664,
+    note: "Simplified rarity tiers informed by community openings; not official factory odds.",
+  },
+  base1: {
+    title: "Pokémon Trading Card Sequences",
+    url: "https://www.cs.sjsu.edu/~stamp/cv/papers/pokemon.pdf",
+    sampleSize: 153,
+    note: "Historical Base Set pack structure and one-in-three holo observation; not official factory odds.",
+  },
+  me5: {
+    title: "Pitch Black pull rates — TCG Talk",
+    url: "https://tcgtalk.com/guides/pitch-black-pull-rates",
+    sampleSize: 753,
+    note: "Observed rarity frequencies normalized to 100%; low-volume chase tiers are estimates, not official factory odds.",
+  },
+};
+
+export function packOddsReference(packPool = "swsh7"): PackOddsReference {
+  return PACK_ODDS_REFERENCES[packPool] ?? PACK_ODDS_REFERENCES.swsh7;
+}
+
 const EVOLVING_SKIES_IMAGE_ROOT = "https://assets.tcgdex.net/en/swsh/swsh7";
 const BASE_SET_IMAGE_ROOT = "https://assets.tcgdex.net/en/base/base1";
 const PITCH_BLACK_IMAGE_ROOT = "https://assets.tcgdex.net/en/me/me05";
@@ -136,8 +174,8 @@ export const PACK_POOL: Record<PackRarityTier, PackCard[]> = {
 
 /**
  * Base Set collector numbers form stable rarity bands. The classic wrapper
- * advertises 11 cards, so its opening uses seven commons, three uncommons, and
- * one rare-or-better card instead of the five-card Pocket-style demo recipe.
+ * advertises 11 cards. Historical box data shows five non-energy commons, two
+ * common Energy cards, three uncommons, and one rare-or-holo card.
  */
 export const BASE_SET_POOL: Record<PackRarityTier, PackCard[]> = {
   common: baseCards("Common", "common", [
@@ -252,107 +290,180 @@ export const BASE_SET_POOL: Record<PackRarityTier, PackCard[]> = {
   chase: baseCards("Holo Rare", "chase", [["4", "Charizard"]]),
 };
 
+const PITCH_BLACK_COMMONS = pitchBlackCards("Common", "common", [
+  ["1", "Tropius"],
+  ["2", "Grubbin"],
+  ["3", "Fomantis"],
+  ["5", "Poltchageist"],
+  ["9", "Sizzlipede"],
+  ["10", "Centiskorch"],
+  ["11", "Charcadet"],
+  ["13", "Goldeen"],
+  ["15", "Wailmer"],
+  ["18", "Popplio"],
+  ["19", "Brionne"],
+  ["21", "Finizen"],
+  ["23", "Electrike"],
+  ["25", "Charjabug"],
+  ["29", "Slowpoke"],
+  ["32", "Jynx"],
+  ["33", "Shuppet"],
+  ["36", "Litwick"],
+  ["42", "Mankey"],
+  ["43", "Primeape"],
+  ["44", "Cranidos"],
+  ["46", "Drilbur"],
+  ["49", "Vullaby"],
+  ["50", "Mandibuzz"],
+  ["51", "Inkay"],
+  ["53", "Nickit"],
+  ["57", "Maschiff"],
+  ["58", "Mabosstiff"],
+  ["60", "Skarmory"],
+  ["61", "Shieldon"],
+  ["63", "Bronzor"],
+  ["66", "Pikipek"],
+  ["67", "Trumbeak"],
+  ["69", "Type: Null"],
+  ["71", "Bombirdier"],
+  ["72", "Antique Armor Fossil"],
+  ["73", "Antique Skull Fossil"],
+]);
+
+const PITCH_BLACK_UNCOMMONS = pitchBlackCards("Uncommon", "uncommon", [
+  ["6", "Sinistcha"],
+  ["7", "Heatran"],
+  ["14", "Seaking"],
+  ["17", "Relicanth"],
+  ["22", "Palafin"],
+  ["24", "Manectric"],
+  ["26", "Vikavolt"],
+  ["30", "Slowbro"],
+  ["34", "Banette"],
+  ["37", "Lampent"],
+  ["39", "Dhelmise"],
+  ["40", "Marshadow"],
+  ["41", "Annihilape"],
+  ["52", "Malamar"],
+  ["54", "Thievul"],
+  ["64", "Bronzong"],
+  ["68", "Toucannon"],
+  ["74", "Backtrack Badge"],
+  ["75", "Dark Bell"],
+  ["76", "Fossil Quarry"],
+  ["77", "Gladion's Final Battle"],
+  ["78", "Gwynn"],
+  ["79", "Jett"],
+  ["80", "Misty's Vitality"],
+  ["81", "Rust Syndicate Grunt"],
+  ["82", "Tremendous Bomb"],
+]);
+
+const PITCH_BLACK_REGULAR_RARES = pitchBlackCards("Rare", "rare", [
+  ["12", "Armarouge"],
+  ["20", "Primarina"],
+  ["28", "Miraidon"],
+  ["35", "Spiritomb"],
+  ["47", "Koraidon"],
+  ["56", "Zarude"],
+  ["59", "Chi-Yu"],
+  ["62", "Bastiodon"],
+  ["70", "Silvally"],
+]);
+
+const PITCH_BLACK_HOLO_ENERGIES = pitchBlackCards("Holo Energy", "rare", [
+  ["83", "Shadowy Darkness Energy"],
+  ["84", "Voltaic Lightning Energy"],
+]);
+
+const PITCH_BLACK_DOUBLE_RARES = pitchBlackCards("Double Rare", "ultra", [
+  ["4", "Lurantis ex"],
+  ["8", "Mega Delphox ex"],
+  ["16", "Wailord ex"],
+  ["27", "Mega Zeraora ex"],
+  ["31", "Mega Slowbro ex"],
+  ["38", "Mega Chandelure ex"],
+  ["45", "Rampardos ex"],
+  ["48", "Mega Darkrai ex"],
+  ["55", "Morpeko ex"],
+  ["65", "Mega Excadrill ex"],
+]);
+
+const PITCH_BLACK_ILLUSTRATION_RARES = pitchBlackCards(
+  "Illustration Rare",
+  "ultra",
+  [
+    ["85", "Fomantis"],
+    ["86", "Armarouge"],
+    ["87", "Goldeen"],
+    ["88", "Primarina"],
+    ["89", "Manectric"],
+    ["90", "Slowbro"],
+    ["91", "Dhelmise"],
+    ["92", "Thievul"],
+    ["93", "Bastiodon"],
+    ["94", "Toucannon"],
+    ["95", "Silvally"],
+  ],
+);
+
+const PITCH_BLACK_ULTRA_RARES = pitchBlackCards("Ultra Rare", "ultra", [
+  ["96", "Lurantis ex"],
+  ["97", "Wailord ex"],
+  ["98", "Mega Zeraora ex"],
+  ["99", "Mega Chandelure ex"],
+  ["100", "Rampardos ex"],
+  ["101", "Mega Darkrai ex"],
+  ["102", "Morpeko ex"],
+  ["103", "Mega Excadrill ex"],
+  ["104", "Brave Bangle"],
+  ["105", "Crushing Hammer"],
+  ["106", "Dark Bell"],
+  ["107", "Energy Switch"],
+  ["108", "Gladion's Final Battle"],
+  ["109", "Gwynn"],
+  ["110", "Iron Defender"],
+  ["111", "Misty's Vitality"],
+  ["112", "Rust Syndicate Grunt"],
+  ["113", "Tremendous Bomb"],
+]);
+
+const PITCH_BLACK_SPECIAL_ILLUSTRATION_RARES = pitchBlackCards(
+  "Special Illustration Rare",
+  "chase",
+  [
+    ["114", "Mega Zeraora ex"],
+    ["115", "Mega Chandelure ex"],
+    ["116", "Mega Darkrai ex"],
+    ["117", "Morpeko ex"],
+    ["118", "Gladion's Final Battle"],
+    ["119", "Gwynn"],
+  ],
+);
+
+const PITCH_BLACK_MEGA_HYPER_RARES = pitchBlackCards(
+  "Mega Hyper Rare",
+  "chase",
+  [["120", "Mega Darkrai ex"]],
+);
+
 /**
- * Curated English Pitch Black (ME5) pool. Its wrapper advertises ten cards, so
- * generation below follows a six-common, three-uncommon, one-rare-or-better
- * recipe and uses TCGdex's cacheable ME05 scans.
+ * Complete English Pitch Black (ME05) pool, verified against TCGdex rarity
+ * metadata. The generator below uses the narrower rarity arrays so each hit
+ * class can follow its own measured rate.
  */
 export const PITCH_BLACK_POOL: Record<PackRarityTier, PackCard[]> = {
-  common: pitchBlackCards("Common", "common", [
-    ["1", "Tropius"],
-    ["2", "Grubbin"],
-    ["3", "Fomantis"],
-    ["5", "Poltchageist"],
-    ["9", "Sizzlipede"],
-    ["11", "Charcadet"],
-    ["13", "Goldeen"],
-    ["15", "Wailmer"],
-    ["18", "Popplio"],
-    ["21", "Finizen"],
-    ["23", "Electrike"],
-    ["25", "Charjabug"],
-    ["29", "Slowpoke"],
-    ["33", "Shuppet"],
-    ["36", "Litwick"],
-    ["42", "Mankey"],
-    ["44", "Cranidos"],
-    ["46", "Drilbur"],
-    ["49", "Vullaby"],
-    ["51", "Inkay"],
-    ["53", "Nickit"],
-    ["57", "Maschiff"],
-    ["60", "Skarmory"],
-    ["61", "Shieldon"],
-    ["63", "Bronzor"],
-    ["66", "Pikipek"],
-    ["69", "Type: Null"],
-    ["71", "Bombirdier"],
-  ]),
-  uncommon: pitchBlackCards("Uncommon", "uncommon", [
-    ["6", "Sinistcha"],
-    ["7", "Heatran"],
-    ["14", "Seaking"],
-    ["17", "Relicanth"],
-    ["19", "Brionne"],
-    ["22", "Palafin"],
-    ["24", "Manectric"],
-    ["26", "Vikavolt"],
-    ["30", "Slowbro"],
-    ["34", "Banette"],
-    ["37", "Lampent"],
-    ["39", "Dhelmise"],
-    ["40", "Marshadow"],
-    ["41", "Annihilape"],
-    ["52", "Malamar"],
-    ["54", "Thievul"],
-    ["64", "Bronzong"],
-    ["68", "Toucannon"],
-  ]),
-  rare: pitchBlackCards("Rare", "rare", [
-    ["12", "Armarouge"],
-    ["20", "Primarina"],
-    ["28", "Miraidon"],
-    ["35", "Spiritomb"],
-    ["47", "Koraidon"],
-    ["56", "Zarude"],
-    ["59", "Chi-Yu"],
-    ["62", "Bastiodon"],
-    ["70", "Silvally"],
-    ["83", "Shadowy Darkness Energy"],
-    ["84", "Voltaic Lightning Energy"],
-  ]),
+  common: PITCH_BLACK_COMMONS,
+  uncommon: PITCH_BLACK_UNCOMMONS,
+  rare: [...PITCH_BLACK_REGULAR_RARES, ...PITCH_BLACK_HOLO_ENERGIES],
   ultra: [
-    ...pitchBlackCards("Double Rare", "ultra", [
-      ["4", "Lurantis ex"],
-      ["8", "Mega Delphox ex"],
-      ["16", "Wailord ex"],
-      ["27", "Mega Zeraora ex"],
-      ["31", "Mega Slowbro ex"],
-      ["38", "Mega Chandelure ex"],
-      ["45", "Rampardos ex"],
-      ["48", "Mega Darkrai ex"],
-      ["55", "Morpeko ex"],
-      ["65", "Mega Excadrill ex"],
-    ]),
-    ...pitchBlackCards("Ultra Rare", "ultra", [
-      ["98", "Mega Zeraora ex"],
-      ["99", "Mega Chandelure ex"],
-      ["101", "Mega Darkrai ex"],
-      ["103", "Mega Excadrill ex"],
-    ]),
+    ...PITCH_BLACK_DOUBLE_RARES,
+    ...PITCH_BLACK_ILLUSTRATION_RARES,
+    ...PITCH_BLACK_ULTRA_RARES,
   ],
   chase: [
-    ...pitchBlackCards("Special Illustration Rare", "chase", [
-      ["114", "Mega Zeraora ex"],
-      ["115", "Mega Chandelure ex"],
-      ["116", "Mega Darkrai ex"],
-      ["117", "Morpeko ex"],
-      ["118", "Gladion's Final Battle"],
-      ["119", "Gwynn"],
-    ]),
-    ...pitchBlackCards("Mega Hyper Rare", "chase", [
-      ["120", "Mega Darkrai ex"],
-    ]),
+    ...PITCH_BLACK_SPECIAL_ILLUSTRATION_RARES,
+    ...PITCH_BLACK_MEGA_HYPER_RARES,
   ],
 };
 
@@ -444,43 +555,177 @@ function pick<T>(
   items: T[],
   exclude: Set<string>,
   keyOf: (item: T) => string,
+  random: () => number = Math.random,
 ): T {
   const available = items.filter((item) => !exclude.has(keyOf(item)));
   const source = available.length > 0 ? available : items;
-  return source[Math.floor(Math.random() * source.length)];
+  return source[Math.floor(random() * source.length)];
 }
 
-function rollSlotFive(): PackRarityTier {
-  const roll = Math.random();
-  if (roll < 0.1) return "chase";
-  if (roll < 0.4) return "ultra";
-  return "rare";
-}
+export const EVOLVING_SKIES_SIMULATOR_RATES = {
+  fourthSlotRare: 0.25,
+  finalSlotChase: 0.1,
+  finalSlotUltra: 0.3,
+  finalSlotRare: 0.6,
+} as const;
 
-function rollBaseRare(): PackRarityTier {
-  const roll = Math.random();
-  if (roll < 0.02) return "chase";
-  if (roll < 0.33) return "ultra";
-  return "rare";
-}
-
-function rollPitchBlackRare(): PackRarityTier {
-  const roll = Math.random();
-  if (roll < 0.03) return "chase";
-  if (roll < 0.35) return "ultra";
+function rollSlotFive(random: () => number): PackRarityTier {
+  const roll = random();
+  if (roll < EVOLVING_SKIES_SIMULATOR_RATES.finalSlotChase) return "chase";
+  if (
+    roll <
+    EVOLVING_SKIES_SIMULATOR_RATES.finalSlotChase +
+      EVOLVING_SKIES_SIMULATOR_RATES.finalSlotUltra
+  ) {
+    return "ultra";
+  }
   return "rare";
 }
 
 function generateFromTiers(
   pool: Record<PackRarityTier, PackCard[]>,
   tiers: PackRarityTier[],
+  random: () => number = Math.random,
 ): PulledCard[] {
   const used = new Set<string>();
   return tiers.map((tier) => {
-    const chosen = pick(pool[tier], used, (candidate) => candidate.id);
+    const chosen = pick(pool[tier], used, (candidate) => candidate.id, random);
     used.add(chosen.id);
     return { ...chosen, ...packCardImageUrls(chosen) };
   });
+}
+
+function generateBaseSetPack(
+  forceChase: boolean,
+  random: () => number,
+): PulledCard[] {
+  const used = new Set<string>();
+  const cards: PulledCard[] = [];
+  const energy = new Set(["97", "98", "99", "100", "101", "102"]);
+  const commonPool = BASE_SET_POOL.common.filter(
+    (card) => !energy.has(card.localId),
+  );
+  const energyPool = BASE_SET_POOL.common.filter((card) =>
+    energy.has(card.localId),
+  );
+
+  const append = (pool: PackCard[], count: number) => {
+    for (let index = 0; index < count; index += 1) {
+      const chosen = pick(pool, used, (candidate) => candidate.id, random);
+      used.add(chosen.id);
+      cards.push({ ...chosen, ...packCardImageUrls(chosen) });
+    }
+  };
+  append(commonPool, 5);
+  append(energyPool, 2);
+  append(BASE_SET_POOL.uncommon, 3);
+
+  const holoPool = [...BASE_SET_POOL.ultra, ...BASE_SET_POOL.chase];
+  const finalPool = forceChase
+    ? BASE_SET_POOL.chase
+    : random() < BASE_SET_PULL_RATES.holo
+      ? holoPool
+      : BASE_SET_POOL.rare;
+  const chosen = pick(finalPool, used, (candidate) => candidate.id, random);
+  return [...cards, { ...chosen, ...packCardImageUrls(chosen) }];
+}
+
+export const BASE_SET_PULL_RATES = {
+  holo: 1 / 3,
+  regularRare: 2 / 3,
+} as const;
+
+/**
+ * Mutually exclusive last-slot outcomes from a 753-pack community sample.
+ * Lower-volume SIR/MHR observations are estimates, not manufacturer odds.
+ * The holo-energy remainder keeps the distribution normalized to 100%.
+ */
+export const PITCH_BLACK_PULL_RATES = {
+  regularRare: 0.534,
+  doubleRare: 0.25,
+  illustrationRare: 0.116,
+  ultraRare: 0.036,
+  specialIllustrationRare: 0.008,
+  megaHyperRare: 0.0013,
+  holoEnergy: 0.0547,
+} as const;
+
+type PitchBlackHit = keyof typeof PITCH_BLACK_PULL_RATES;
+
+function rollPitchBlackHit(random: () => number): PitchBlackHit {
+  const roll = random();
+  let threshold = 0;
+  for (const [rarity, probability] of Object.entries(
+    PITCH_BLACK_PULL_RATES,
+  ) as Array<[PitchBlackHit, number]>) {
+    threshold += probability;
+    if (roll < threshold) return rarity;
+  }
+  return "regularRare";
+}
+
+function pitchBlackHitPool(hit: PitchBlackHit): PackCard[] {
+  switch (hit) {
+    case "regularRare":
+      return PITCH_BLACK_REGULAR_RARES;
+    case "doubleRare":
+      return PITCH_BLACK_DOUBLE_RARES;
+    case "illustrationRare":
+      return PITCH_BLACK_ILLUSTRATION_RARES;
+    case "ultraRare":
+      return PITCH_BLACK_ULTRA_RARES;
+    case "specialIllustrationRare":
+      return PITCH_BLACK_SPECIAL_ILLUSTRATION_RARES;
+    case "megaHyperRare":
+      return PITCH_BLACK_MEGA_HYPER_RARES;
+    case "holoEnergy":
+      return PITCH_BLACK_HOLO_ENERGIES;
+  }
+}
+
+function generatePitchBlackPack(
+  forceChase: boolean,
+  random: () => number,
+): PulledCard[] {
+  const cards = generateFromTiers(
+    PITCH_BLACK_POOL,
+    [
+      "common",
+      "common",
+      "common",
+      "common",
+      "uncommon",
+      "uncommon",
+      "uncommon",
+    ],
+    random,
+  );
+  const used = new Set(cards.map((card) => card.id));
+  const reversePool = [
+    ...PITCH_BLACK_COMMONS,
+    ...PITCH_BLACK_UNCOMMONS,
+    ...PITCH_BLACK_REGULAR_RARES,
+  ];
+
+  for (let index = 0; index < 2; index += 1) {
+    const chosen = pick(reversePool, used, (candidate) => candidate.id, random);
+    used.add(chosen.id);
+    cards.push({
+      ...chosen,
+      rarity: `Reverse Holo ${chosen.rarity}`,
+      ...packCardImageUrls(chosen),
+    });
+  }
+
+  const hitPool = forceChase
+    ? [
+        ...PITCH_BLACK_SPECIAL_ILLUSTRATION_RARES,
+        ...PITCH_BLACK_MEGA_HYPER_RARES,
+      ]
+    : pitchBlackHitPool(rollPitchBlackHit(random));
+  const hit = pick(hitPool, used, (candidate) => candidate.id, random);
+  cards.push({ ...hit, ...packCardImageUrls(hit) });
+  return cards;
 }
 
 /**
@@ -490,42 +735,22 @@ function generateFromTiers(
 export function generatePack(
   forceChase = false,
   packPool = "swsh7",
+  random: () => number = Math.random,
 ): PulledCard[] {
   if (packPool === "base1") {
-    return generateFromTiers(BASE_SET_POOL, [
-      "common",
-      "common",
-      "common",
-      "common",
-      "common",
-      "common",
-      "common",
-      "uncommon",
-      "uncommon",
-      "uncommon",
-      forceChase ? "chase" : rollBaseRare(),
-    ]);
+    return generateBaseSetPack(forceChase, random);
   }
   if (packPool === "me5") {
-    return generateFromTiers(PITCH_BLACK_POOL, [
-      "common",
-      "common",
-      "common",
-      "common",
-      "common",
-      "common",
-      "uncommon",
-      "uncommon",
-      "uncommon",
-      forceChase ? "chase" : rollPitchBlackRare(),
-    ]);
+    return generatePitchBlackPack(forceChase, random);
   }
   const tiers: PackRarityTier[] = [
     "common",
     "common",
     "common",
-    Math.random() < 0.25 ? "rare" : "uncommon",
-    forceChase ? "chase" : rollSlotFive(),
+    random() < EVOLVING_SKIES_SIMULATOR_RATES.fourthSlotRare
+      ? "rare"
+      : "uncommon",
+    forceChase ? "chase" : rollSlotFive(random),
   ];
-  return generateFromTiers(PACK_POOL, tiers);
+  return generateFromTiers(PACK_POOL, tiers, random);
 }

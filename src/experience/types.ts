@@ -28,12 +28,20 @@ export interface PackOpeningPullSession {
   packs: PackOpeningPull[][];
 }
 
+export interface PackOpeningOddsReference {
+  title: string;
+  url: string;
+  sampleSize: number;
+  note: string;
+}
+
 export interface PackOpeningNativePackOption {
   id: string;
   label: string;
   setID: string;
   setLabel: string;
   variationLabel: string;
+  oddsReference: PackOpeningOddsReference;
 }
 
 export interface PackOpeningNativeState {

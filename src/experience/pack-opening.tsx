@@ -15,7 +15,12 @@ import {
 import type { SheetLayout } from "../index";
 
 import { cn } from "./classNames";
-import { generatePack, tierRank, type PulledCard } from "./pack-data";
+import {
+  generatePack,
+  packOddsReference,
+  tierRank,
+  type PulledCard,
+} from "./pack-data";
 import { packGeometry } from "./pack-mesh";
 import {
   PackExperience,
@@ -123,6 +128,10 @@ export function PackOpening({
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
   const previousPhaseRef = useRef<PackPhase | null>(null);
+  const selectedOddsReference = useMemo(
+    () => packOddsReference(browseSkin.packPool),
+    [browseSkin.packPool],
+  );
 
   useEffect(() => {
     controls.current.timeScale = slowMo ? 0.25 : 1;
@@ -144,10 +153,7 @@ export function PackOpening({
       setPackBackwards(backwards);
       setPacks(
         Array.from({ length: packCount }, () =>
-          generatePack(
-            forceChase,
-            skin.packPool,
-          ),
+          generatePack(forceChase, skin.packPool),
         ),
       );
       setPackIndex(0);
@@ -234,16 +240,17 @@ export function PackOpening({
     onEvent?.({ type: "haptic", style: "impact" });
     setPhase("opening");
   }, [onEvent]);
-  // Bulk opens skip the card-by-card ritual: one tear, all results at once,
-  // matching the reference app's multi-pack flow.
+  // Multi-pack opens are one ritual followed by a grouped summary. Requiring
+  // five or ten separate tears and dozens of card swipes makes bulk opening
+  // feel like a queue instead of a payoff.
   const handleOpened = useCallback(() => {
-    if (openingMode === "quick") {
+    if (openingMode === "quick" || packs.length > 1) {
       setPhase("final");
     } else {
       setPhase("reveal");
       setRevealedCount(1);
     }
-  }, [openingMode]);
+  }, [openingMode, packs.length]);
   const handleReveal = useCallback(
     (count: number) => setRevealedCount(count),
     [],
@@ -505,12 +512,13 @@ export function PackOpening({
         openingMode,
         packBackwards,
         packOptions: skins.map(
-          ({ id, label, setID, setLabel, variationLabel }) => ({
+          ({ id, label, setID, setLabel, variationLabel, packPool }) => ({
             id,
             label,
             setID,
             setLabel,
             variationLabel,
+            oddsReference: packOddsReference(packPool),
           }),
         ),
         revealedCount,
@@ -621,9 +629,9 @@ export function PackOpening({
                 cards={currentPack}
                 variant={variant}
                 sheet={openingSheet}
-                // Keep the unopened stack visible in both modes. Normal opens
-                // the front pack card-by-card, then returns with one fewer
-                // wrapper; Quick skips directly to the grouped results.
+                // Keep the unopened stack visible in both modes. A single
+                // Normal pack reveals card-by-card; multi-pack and Quick opens
+                // go directly to the grouped results.
                 packCount={Math.max(1, packs.length - packIndex)}
                 backwards={packBackwards}
                 nativeLayout={nativeControls}
@@ -809,6 +817,19 @@ export function PackOpening({
               {uploadError}
             </p>
           )}
+          <p className="max-w-2xl text-center text-[11px] leading-snug text-muted-foreground sm:text-xs">
+            Pull-rate reference:{" "}
+            <a
+              href={selectedOddsReference.url}
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold text-foreground underline underline-offset-2"
+            >
+              {selectedOddsReference.title}
+            </a>{" "}
+            · {selectedOddsReference.sampleSize.toLocaleString()} packs.{" "}
+            {selectedOddsReference.note}
+          </p>
           <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col">
             <div className="flex shrink-0 justify-center gap-1.5 sm:gap-2">
               {PACK_COUNTS.map((n) => (
