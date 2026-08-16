@@ -817,19 +817,23 @@ export function PackOpening({
               {uploadError}
             </p>
           )}
-          <p className="max-w-2xl text-center text-[11px] leading-snug text-muted-foreground sm:text-xs">
-            Pull-rate reference:{" "}
-            <a
-              href={selectedOddsReference.url}
-              target="_blank"
-              rel="noreferrer"
-              className="font-semibold text-foreground underline underline-offset-2"
-            >
-              {selectedOddsReference.title}
-            </a>{" "}
-            · {selectedOddsReference.sampleSize.toLocaleString()} packs.{" "}
-            {selectedOddsReference.note}
-          </p>
+          <details className="max-w-2xl text-center text-[11px] leading-snug text-muted-foreground sm:text-xs">
+            <summary className="cursor-pointer font-semibold text-foreground">
+              Odds source
+            </summary>
+            <p className="mt-1">
+              <a
+                href={selectedOddsReference.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-foreground underline underline-offset-2"
+              >
+                {selectedOddsReference.title}
+              </a>{" "}
+              · {selectedOddsReference.sampleSize.toLocaleString()} packs.{" "}
+              {selectedOddsReference.note}
+            </p>
+          </details>
           <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col">
             <div className="flex shrink-0 justify-center gap-1.5 sm:gap-2">
               {PACK_COUNTS.map((n) => (
