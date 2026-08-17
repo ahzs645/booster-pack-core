@@ -21,6 +21,8 @@
     "sync-assets": "node scripts/sync-assets.mjs",
     "pretypecheck": "npm run verify-assets",
     "typecheck": "tsc --noEmit",
+    "verify-backwards-reveal": "node --experimental-strip-types scripts/verify-backwards-reveal.mjs",
+    "verify-card-visibility": "node --experimental-strip-types scripts/verify-card-visibility.mjs",
     "verify-assets": "node scripts/verify-assets.mjs",
     "verify-split": "node --experimental-strip-types scripts/verify-split.mjs"
   },

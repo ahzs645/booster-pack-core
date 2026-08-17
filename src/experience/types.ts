@@ -51,6 +51,7 @@ export interface PackOpeningNativeState {
   packCount: number;
   openingMode: PackOpeningMode;
   packBackwards: boolean;
+  currentCardFaceUp: boolean;
   packOptions: PackOpeningNativePackOption[];
   revealedCount: number;
   totalCards: number;

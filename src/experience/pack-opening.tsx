@@ -104,6 +104,7 @@ export function PackOpening({
   const [packCount, setPackCount] = useState<number>(1);
   const [openingMode, setOpeningMode] = useState<PackOpeningMode>("normal");
   const [packBackwards, setPackBackwards] = useState(false);
+  const [currentCardFaceUp, setCurrentCardFaceUp] = useState(true);
   const [browseSkin, setBrowseSkin] = useState<PackSkin>(VARIANT_SKINS[0]);
   const [openedSkin, setOpenedSkin] = useState<PackSkin | null>(null);
   const [uploads, setUploads] = useState<PackSkin[]>([]);
@@ -151,6 +152,7 @@ export function PackOpening({
       setOpenedAt(new Date().toISOString());
       setOpenedSkin(skin);
       setPackBackwards(backwards);
+      setCurrentCardFaceUp(!backwards);
       setPacks(
         Array.from({ length: packCount }, () =>
           generatePack(forceChase, skin.packPool),
@@ -159,9 +161,11 @@ export function PackOpening({
       setPackIndex(0);
       setRevealedCount(0);
       setRemountKey((k) => k + 1);
-      setPhase("tear");
+      // Quick Open is only for a single pack. Bulk openings keep the stacked
+      // one-cut ritual, then go directly to their grouped results.
+      setPhase(openingMode === "quick" && packCount === 1 ? "final" : "tear");
     },
-    [packCount, forceChase],
+    [forceChase, openingMode, packCount],
   );
 
   const rerollCurrent = useCallback(() => {
@@ -234,6 +238,7 @@ export function PackOpening({
     setOpenedSkin(null);
     setPackIndex(0);
     setRevealedCount(0);
+    setCurrentCardFaceUp(true);
   }, []);
 
   const handleTorn = useCallback(() => {
@@ -248,9 +253,10 @@ export function PackOpening({
       setPhase("final");
     } else {
       setPhase("reveal");
-      setRevealedCount(1);
+      setRevealedCount(packBackwards ? 0 : 1);
+      setCurrentCardFaceUp(!packBackwards);
     }
-  }, [openingMode, packs.length]);
+  }, [openingMode, packBackwards, packs.length]);
   const handleReveal = useCallback(
     (count: number) => setRevealedCount(count),
     [],
@@ -415,7 +421,11 @@ export function PackOpening({
           setOpeningMode(command.mode);
           break;
         case "togglePackOrientation":
-          setPackBackwards((value) => !value);
+          setPackBackwards((value) => {
+            const next = !value;
+            setCurrentCardFaceUp(!next);
+            return next;
+          });
           break;
         case "openPack":
           if (controls.current.openSelected) {
@@ -491,6 +501,7 @@ export function PackOpening({
         packCount,
         openingMode,
         packBackwards,
+        currentCardFaceUp,
         packOptions: skins.map(
           ({ id, label, setID, setLabel, variationLabel, packPool }) => ({
             id,
@@ -521,6 +532,7 @@ export function PackOpening({
     completionActionLabel,
     completedSession,
     currentPack?.length,
+    currentCardFaceUp,
     nativeControls,
     onEvent,
     packCount,
@@ -620,6 +632,7 @@ export function PackOpening({
                 onTorn={handleTorn}
                 onOpened={handleOpened}
                 onReveal={handleReveal}
+                onCardFaceChanged={setCurrentCardFaceUp}
                 onAllRevealed={handleAllRevealed}
                 onFlash={handleFlash}
               />
@@ -683,7 +696,11 @@ export function PackOpening({
         >
           {phase === "tear" && packs.length > 1
             ? `Tear once to open all ${packs.length} packs`
-            : PHASE_HINTS[phase]}
+            : phase === "reveal" && packBackwards
+              ? currentCardFaceUp
+                ? "Swipe card away"
+                : "Tap to flip"
+              : PHASE_HINTS[phase]}
         </p>
       )}
 
@@ -701,7 +718,11 @@ export function PackOpening({
               phase === "reveal"
                 ? currentPack && revealedCount >= currentPack.length
                   ? "Finish reveal"
-                  : "Reveal next card"
+                  : packBackwards
+                    ? currentCardFaceUp
+                      ? "Slide current card away"
+                      : "Flip current card"
+                    : "Reveal next card"
                 : undefined
             }
             className="min-h-11 rounded-full border border-border bg-background/90 px-4 py-2.5 text-sm font-semibold shadow-sm backdrop-blur transition hover:bg-muted"
@@ -712,7 +733,11 @@ export function PackOpening({
                 : "Skip tear animation"
               : currentPack && revealedCount >= currentPack.length
                 ? "Finish reveal"
-                : "Reveal next"}
+                : packBackwards
+                  ? currentCardFaceUp
+                    ? "Slide card away"
+                    : "Flip card"
+                  : "Reveal next"}
           </button>
           {phase === "reveal" && (
             <button
