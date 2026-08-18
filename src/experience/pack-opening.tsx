@@ -573,7 +573,7 @@ export function PackOpening({
       className={cn(
         "relative isolate w-full overflow-hidden bg-gradient-to-b from-muted/40 via-background to-primary/5",
         embedded
-          ? "h-dvh min-h-0 rounded-none border-0"
+          ? "h-full min-h-0 rounded-none border-0"
           : "h-[calc(100dvh-15rem)] min-h-[30rem] rounded-2xl border md:h-[72vh] md:min-h-[540px]",
       )}
     >
