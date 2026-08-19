@@ -71,6 +71,30 @@ export function packCardImageUrls(card: PackCard): {
   };
 }
 
+/**
+ * Every distinct card that the selected simulator pool can produce. This is
+ * intentionally derived from the same rarity pools as `generatePack`, so the
+ * host UIs never need a second, manually maintained set checklist.
+ */
+export function possiblePackCards(packPool = "swsh7"): PulledCard[] {
+  const pool =
+    packPool === "base1"
+      ? BASE_SET_POOL
+      : packPool === "me5"
+        ? PITCH_BLACK_POOL
+        : PACK_POOL;
+  const seen = new Set<string>();
+
+  return Object.values(pool)
+    .flat()
+    .filter((card) => {
+      if (seen.has(card.id)) return false;
+      seen.add(card.id);
+      return true;
+    })
+    .map((card) => ({ ...card, ...packCardImageUrls(card) }));
+}
+
 function pitchBlackCards(
   rarity: string,
   tier: PackRarityTier,

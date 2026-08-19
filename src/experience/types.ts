@@ -41,7 +41,14 @@ export interface PackOpeningNativePackOption {
   setID: string;
   setLabel: string;
   variationLabel: string;
+  packPoolID: string;
   oddsReference: PackOpeningOddsReference;
+}
+
+export interface PackOpeningNativeCardPool {
+  id: string;
+  label: string;
+  cards: PackOpeningPull[];
 }
 
 export interface PackOpeningNativeState {
@@ -53,6 +60,7 @@ export interface PackOpeningNativeState {
   packBackwards: boolean;
   currentCardFaceUp: boolean;
   packOptions: PackOpeningNativePackOption[];
+  cardPools: PackOpeningNativeCardPool[];
   revealedCount: number;
   totalCards: number;
   currentPackNumber: number;

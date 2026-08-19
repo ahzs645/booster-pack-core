@@ -18,6 +18,7 @@ import { cn } from "./classNames";
 import {
   generatePack,
   packOddsReference,
+  possiblePackCards,
   tierRank,
   type PulledCard,
 } from "./pack-data";
@@ -351,6 +352,32 @@ export function PackOpening({
     );
     return [...publishedCovers, ...generatedFallbacks, ...uploads];
   }, [manifest, uploads]);
+  const nativeCardPools = useMemo(() => {
+    const pools = new Map<string, { id: string; label: string }>();
+    for (const option of skins) {
+      if (!pools.has(option.packPool)) {
+        pools.set(option.packPool, {
+          id: option.packPool,
+          label: option.setLabel,
+        });
+      }
+    }
+    return [...pools.values()].map((pool) => ({
+      ...pool,
+      cards: possiblePackCards(pool.id).map((card) => ({
+        cardId: card.id,
+        name: card.name,
+        rarity: card.rarity,
+        tier: card.tier,
+        collectorNumber: card.localId,
+        tcg: card.tcg,
+        setCode: card.setCode,
+        setName: card.setName,
+        imageUrl: card.imageUrl,
+        imageUrlSmall: card.imageUrlSmall,
+      })),
+    }));
+  }, [skins]);
   useEffect(() => {
     if (skins.some((option) => option.id === browseSkin.id)) return;
     const replacement =
@@ -509,9 +536,11 @@ export function PackOpening({
             setID,
             setLabel,
             variationLabel,
+            packPoolID: packPool,
             oddsReference: packOddsReference(packPool),
           }),
         ),
+        cardPools: nativeCardPools,
         revealedCount,
         totalCards: currentPack?.length ?? 0,
         currentPackNumber: packs.length > 0 ? packIndex + 1 : 0,
@@ -534,6 +563,7 @@ export function PackOpening({
     currentPack?.length,
     currentCardFaceUp,
     nativeControls,
+    nativeCardPools,
     onEvent,
     packCount,
     openingMode,

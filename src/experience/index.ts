@@ -3,6 +3,7 @@ export type {
   PackOpeningEvent,
   PackOpeningMode,
   PackOpeningNativeCommand,
+  PackOpeningNativeCardPool,
   PackOpeningNativePackOption,
   PackOpeningNativeState,
   PackOpeningOddsReference,
