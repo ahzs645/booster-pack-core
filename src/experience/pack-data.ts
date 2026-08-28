@@ -54,7 +54,9 @@ export const PACK_ODDS_REFERENCES: Record<string, PackOddsReference> = {
 };
 
 export function packOddsReference(packPool = "swsh7"): PackOddsReference {
-  return PACK_ODDS_REFERENCES[packPool] ?? PACK_ODDS_REFERENCES.swsh7;
+  const reference = PACK_ODDS_REFERENCES[packPool];
+  if (!reference) throw new Error(`Unknown pack pool: ${packPool}`);
+  return reference;
 }
 
 const EVOLVING_SKIES_IMAGE_ROOT = "https://assets.tcgdex.net/en/swsh/swsh7";
@@ -82,7 +84,10 @@ export function possiblePackCards(packPool = "swsh7"): PulledCard[] {
       ? BASE_SET_POOL
       : packPool === "me5"
         ? PITCH_BLACK_POOL
-        : PACK_POOL;
+        : packPool === "swsh7"
+          ? PACK_POOL
+          : null;
+  if (!pool) throw new Error(`Unknown pack pool: ${packPool}`);
   const seen = new Set<string>();
 
   return Object.values(pool)
@@ -766,6 +771,9 @@ export function generatePack(
   }
   if (packPool === "me5") {
     return generatePitchBlackPack(forceChase, random);
+  }
+  if (packPool !== "swsh7") {
+    throw new Error(`Unknown pack pool: ${packPool}`);
   }
   const tiers: PackRarityTier[] = [
     "common",

@@ -93,14 +93,17 @@ function setLabelForPool(pool: string): string {
 }
 
 export function coverSkins(manifest: Manifest | null): PackSkin[] {
-  return Object.entries(manifest?.covers ?? {}).map(([id, cover]) => {
-    const packPool = cover.packPool ?? cover.setCode ?? "swsh7";
+  return Object.entries(manifest?.covers ?? {}).flatMap(([id, cover]) => {
+    const packPool = cover.packPool ?? cover.setCode;
+    // A remote cover without an explicit pool must never inherit a real card
+    // pool. Skip it until a verified declarative product binds the artwork.
+    if (!packPool) return [];
     const setID = cover.setCode ?? packPool;
     const setLabel = cover.setName ?? setLabelForPool(packPool);
     const inferredVariationLabel = cover.label.includes("·")
       ? cover.label.split("·").at(-1)?.trim() ?? cover.label
       : cover.label;
-    return {
+    return [{
       kind: "cover" as const,
       id,
       label: cover.label,
@@ -112,7 +115,7 @@ export function coverSkins(manifest: Manifest | null): PackSkin[] {
       // The plain sheet: the decaled variant differs only by an overlay mark, and
       // offering both doubles the picker for a difference you cannot see at chip size.
       url: cover.plain,
-    };
+    }];
   });
 }
 
