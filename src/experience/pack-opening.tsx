@@ -16,12 +16,16 @@ import type { SheetLayout } from "../index";
 
 import { cn } from "./classNames";
 import {
-  generatePack,
   packOddsReference,
   possiblePackCards,
   tierRank,
   type PulledCard,
 } from "./pack-data";
+import {
+  generatePackForClass,
+  recordOpeningProgress,
+  rollPackClass,
+} from "./pack-events";
 import { packGeometry } from "./pack-mesh";
 import {
   PackExperience,
@@ -43,7 +47,10 @@ import {
 import type {
   PackOpeningMode,
   PackOpeningNativeCommand,
+  PackOpeningPackClassResult,
   PackOpeningProps,
+  PackOpeningPull,
+  PackOpeningRecap,
   PackOpeningPullSession,
 } from "./types";
 
@@ -54,6 +61,72 @@ const PHASE_HINTS: Partial<Record<PackPhase, string>> = {
 };
 
 const PACK_COUNTS = [1, 5, 10] as const;
+
+const PACK_CLASS_RANK: Record<PackOpeningPackClassResult["id"], number> = {
+  standard: 0,
+  "hit-heavy": 1,
+  "rare-pack": 2,
+};
+
+function pullForSession(card: PulledCard): PackOpeningPull {
+  return {
+    cardId: card.id,
+    name: card.name,
+    rarity: card.rarity,
+    tier: card.tier,
+    collectorNumber: card.localId,
+    tcg: card.tcg,
+    setCode: card.setCode,
+    setName: card.setName,
+    imageUrl: card.imageUrl,
+    imageUrlSmall: card.imageUrlSmall,
+  };
+}
+
+function rarestPackClass(
+  packClasses: PackOpeningPackClassResult[],
+): PackOpeningPackClassResult | undefined {
+  return packClasses.reduce<PackOpeningPackClassResult | undefined>(
+    (best, candidate) =>
+      !best || PACK_CLASS_RANK[candidate.id] > PACK_CLASS_RANK[best.id]
+        ? candidate
+        : best,
+    undefined,
+  );
+}
+
+function playPackEventSound(packClass: PackOpeningPackClassResult): void {
+  try {
+    const AudioContextClass =
+      globalThis.AudioContext ??
+      (
+        globalThis as typeof globalThis & {
+          webkitAudioContext?: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.75);
+    gain.connect(context.destination);
+
+    const frequencies =
+      packClass.id === "rare-pack" ? [220, 440, 880] : [196, 392];
+    frequencies.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = index === frequencies.length - 1 ? "sine" : "triangle";
+      oscillator.frequency.value = frequency;
+      oscillator.connect(gain);
+      oscillator.start(context.currentTime + index * 0.11);
+      oscillator.stop(context.currentTime + 0.72);
+    });
+    window.setTimeout(() => void context.close(), 900);
+  } catch {
+    // Audio is an enhancement; haptics and lighting still communicate the event.
+  }
+}
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -112,6 +185,10 @@ export function PackOpening({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [artworkWarning, setArtworkWarning] = useState<string | null>(null);
   const [packs, setPacks] = useState<PulledCard[][]>([]);
+  const [packClasses, setPackClasses] = useState<PackOpeningPackClassResult[]>(
+    [],
+  );
+  const [openingRecap, setOpeningRecap] = useState<PackOpeningRecap>();
   const [openingID, setOpeningID] = useState("");
   const [openedAt, setOpenedAt] = useState("");
   const [packIndex, setPackIndex] = useState(0);
@@ -130,6 +207,10 @@ export function PackOpening({
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
   const previousPhaseRef = useRef<PackPhase | null>(null);
+  const recordedOpeningIDsRef = useRef(new Set<string>());
+  const playedOmenIDsRef = useRef(new Set<string>());
+  const tornAtRef = useRef(0);
+  const openingCompletionTimerRef = useRef<number | undefined>(undefined);
   const selectedOddsReference = useMemo(
     () => packOddsReference(browseSkin.packPool),
     [browseSkin.packPool],
@@ -145,6 +226,7 @@ export function PackOpening({
 
   const startPacks = useCallback(
     (skin: PackSkin, backwards = false) => {
+      window.clearTimeout(openingCompletionTimerRef.current);
       setArtworkWarning(null);
       setOpeningID(
         globalThis.crypto?.randomUUID?.() ??
@@ -152,11 +234,16 @@ export function PackOpening({
       );
       setOpenedAt(new Date().toISOString());
       setOpenedSkin(skin);
+      setOpeningRecap(undefined);
       setPackBackwards(backwards);
       setCurrentCardFaceUp(!backwards);
+      const nextPackClasses = Array.from({ length: packCount }, () =>
+        rollPackClass(skin.packPool),
+      );
+      setPackClasses(nextPackClasses);
       setPacks(
-        Array.from({ length: packCount }, () =>
-          generatePack(forceChase, skin.packPool),
+        nextPackClasses.map((packClass) =>
+          generatePackForClass(packClass, forceChase, skin.packPool),
         ),
       );
       setPackIndex(0);
@@ -176,9 +263,19 @@ export function PackOpening({
     );
     setOpenedAt(new Date().toISOString());
     const packPool = openedSkin?.packPool;
+    if (!packPool) return;
+    const nextPackClass = rollPackClass(packPool);
+    setOpeningRecap(undefined);
+    setPackClasses((previous) =>
+      previous.map((value, index) =>
+        index === packIndex ? nextPackClass : value,
+      ),
+    );
     setPacks((prev) =>
       prev.map((p, i) =>
-        i === packIndex ? generatePack(forceChase, packPool) : p,
+        i === packIndex
+          ? generatePackForClass(nextPackClass, forceChase, packPool)
+          : p,
       ),
     );
     setRevealedCount(0);
@@ -186,56 +283,36 @@ export function PackOpening({
     setPhase("tear");
   }, [packIndex, forceChase, openedSkin]);
 
-  const requestSave = useCallback(() => {
-    if (!openingID || packs.length === 0) return;
-    const session: PackOpeningPullSession = {
-      id: openingID,
-      packLabel: openedSkin?.label ?? "Booster pack",
-      openedAt,
-      packs: packs.map((pack) =>
-        pack.map((card) => ({
-          cardId: card.id,
-          name: card.name,
-          rarity: card.rarity,
-          tier: card.tier,
-          collectorNumber: card.localId,
-          tcg: card.tcg,
-          setCode: card.setCode,
-          setName: card.setName,
-          imageUrl: card.imageUrl,
-          imageUrlSmall: card.imageUrlSmall,
-        })),
-      ),
-    };
-    onEvent?.({ type: "saveRequested", session });
-  }, [openedAt, openedSkin?.label, openingID, onEvent, packs]);
-
   const completedSession = useMemo<PackOpeningPullSession | undefined>(() => {
     if (!openingID || packs.length === 0) return undefined;
     return {
       id: openingID,
       packLabel: openedSkin?.label ?? "Booster pack",
       openedAt,
-      packs: packs.map((pack) =>
-        pack.map((card) => ({
-          cardId: card.id,
-          name: card.name,
-          rarity: card.rarity,
-          tier: card.tier,
-          collectorNumber: card.localId,
-          tcg: card.tcg,
-          setCode: card.setCode,
-          setName: card.setName,
-          imageUrl: card.imageUrl,
-          imageUrlSmall: card.imageUrlSmall,
-        })),
-      ),
+      packs: packs.map((pack) => pack.map(pullForSession)),
+      packClasses,
+      recap: openingRecap,
     };
-  }, [openedAt, openedSkin?.label, openingID, packs]);
+  }, [
+    openedAt,
+    openedSkin?.label,
+    openingID,
+    openingRecap,
+    packClasses,
+    packs,
+  ]);
+
+  const requestSave = useCallback(() => {
+    if (completedSession)
+      onEvent?.({ type: "saveRequested", session: completedSession });
+  }, [completedSession, onEvent]);
 
   const backToSelect = useCallback(() => {
+    window.clearTimeout(openingCompletionTimerRef.current);
     setPhase("select");
     setPacks([]);
+    setPackClasses([]);
+    setOpeningRecap(undefined);
     setOpenedSkin(null);
     setPackIndex(0);
     setRevealedCount(0);
@@ -243,6 +320,7 @@ export function PackOpening({
   }, []);
 
   const handleTorn = useCallback(() => {
+    tornAtRef.current = performance.now();
     onEvent?.({ type: "haptic", style: "impact" });
     setPhase("opening");
   }, [onEvent]);
@@ -250,14 +328,27 @@ export function PackOpening({
   // five or ten separate tears and dozens of card swipes makes bulk opening
   // feel like a queue instead of a payoff.
   const handleOpened = useCallback(() => {
-    if (openingMode === "quick" || packs.length > 1) {
-      setPhase("final");
+    const finish = () => {
+      if (openingMode === "quick" || packs.length > 1) {
+        setPhase("final");
+      } else {
+        setPhase("reveal");
+        setRevealedCount(packBackwards ? 0 : 1);
+        setCurrentCardFaceUp(!packBackwards);
+      }
+    };
+    const eventClass = rarestPackClass(packClasses);
+    const minimumOmenDuration =
+      eventClass && eventClass.id !== "standard" ? 900 : 0;
+    const remaining =
+      minimumOmenDuration - (performance.now() - tornAtRef.current);
+    if (remaining > 0) {
+      window.clearTimeout(openingCompletionTimerRef.current);
+      openingCompletionTimerRef.current = window.setTimeout(finish, remaining);
     } else {
-      setPhase("reveal");
-      setRevealedCount(packBackwards ? 0 : 1);
-      setCurrentCardFaceUp(!packBackwards);
+      finish();
     }
-  }, [openingMode, packBackwards, packs.length]);
+  }, [openingMode, packBackwards, packClasses, packs.length]);
   const handleReveal = useCallback(
     (count: number) => setRevealedCount(count),
     [],
@@ -275,6 +366,7 @@ export function PackOpening({
     setPhase("summary");
   }, [onEvent, openingMode, packIndex, packs.length]);
   const skipToResults = useCallback(() => {
+    window.clearTimeout(openingCompletionTimerRef.current);
     onEvent?.({ type: "haptic", style: "success" });
     setPhase("final");
   }, [onEvent]);
@@ -419,12 +511,64 @@ export function PackOpening({
     [layout],
   );
   const currentPack = packs[packIndex] ?? null;
+  const openingEventClass = useMemo(
+    () => rarestPackClass(packClasses),
+    [packClasses],
+  );
   const revealed = currentPack ? currentPack.slice(0, revealedCount) : [];
   const canvasVisible =
     phase === "select" ||
     phase === "tear" ||
     phase === "opening" ||
     phase === "reveal";
+
+  useEffect(() => {
+    if (
+      (phase !== "summary" && phase !== "final") ||
+      !openingID ||
+      !openedSkin ||
+      packs.length === 0 ||
+      packClasses.length !== packs.length ||
+      recordedOpeningIDsRef.current.has(openingID)
+    ) {
+      return;
+    }
+    recordedOpeningIDsRef.current.add(openingID);
+    setOpeningRecap(
+      recordOpeningProgress({
+        openingID,
+        packPool: openedSkin.packPool,
+        setName: packs[0]?.[0]?.setName ?? openedSkin.setLabel,
+        packs,
+        packClasses,
+      }),
+    );
+  }, [openedSkin, openingID, packClasses, packs, phase]);
+
+  useEffect(() => {
+    if (
+      phase !== "opening" ||
+      !openingEventClass ||
+      openingEventClass.id === "standard"
+    ) {
+      return;
+    }
+    const omenID = `${openingID}:${packIndex}`;
+    if (playedOmenIDsRef.current.has(omenID)) return;
+    playedOmenIDsRef.current.add(omenID);
+    playPackEventSound(openingEventClass);
+    onEvent?.({ type: "haptic", style: "selection" });
+    const timer = window.setTimeout(
+      () => onEvent?.({ type: "haptic", style: "success" }),
+      openingEventClass.id === "rare-pack" ? 260 : 180,
+    );
+    return () => window.clearTimeout(timer);
+  }, [onEvent, openingEventClass, openingID, packIndex, phase]);
+
+  useEffect(
+    () => () => window.clearTimeout(openingCompletionTimerRef.current),
+    [],
+  );
 
   useEffect(() => {
     if (!nativeControls) return;
@@ -682,6 +826,32 @@ export function PackOpening({
           }}
         />
       )}
+      {phase === "opening" &&
+        openingEventClass &&
+        openingEventClass.id !== "standard" && (
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden",
+              openingEventClass.id === "rare-pack"
+                ? "bg-amber-300/10"
+                : "bg-violet-400/10",
+            )}
+            role="status"
+            aria-live="assertive"
+          >
+            <div
+              className={cn(
+                "absolute -inset-1/2 animate-[pack-omen-spin_2.8s_linear_infinite] opacity-75",
+                openingEventClass.id === "rare-pack"
+                  ? "bg-[conic-gradient(from_90deg,transparent,#fde68a,transparent,#f0abfc,transparent,#7dd3fc,transparent)]"
+                  : "bg-[conic-gradient(from_90deg,transparent,#c4b5fd,transparent,#7dd3fc,transparent)]",
+              )}
+            />
+            <div className="relative animate-[pack-omen-in_0.5s_ease-out_both] rounded-full border border-white/35 bg-black/55 px-5 py-3 text-center text-sm font-semibold tracking-wide text-white shadow-2xl backdrop-blur-md sm:text-base">
+              Something feels different…
+            </div>
+          </div>
+        )}
       {artworkWarning && !nativeControls && (
         <p
           role="status"
@@ -692,6 +862,11 @@ export function PackOpening({
       )}
       <style>{`
         @keyframes pack-flash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+        @keyframes pack-omen-in {
+          0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes pack-omen-spin { to { transform: rotate(360deg); } }
         @keyframes pack-card-in {
           0% { opacity: 0; transform: translateY(14px) scale(0.94); }
           100% { opacity: 1; transform: translateY(0) scale(1); }
@@ -909,6 +1084,7 @@ export function PackOpening({
           >
             Pack results
           </h2>
+          {completedSession && <OpeningRecapPanel session={completedSession} />}
           <div className="flex flex-wrap items-start justify-center gap-4">
             {currentPack.map((card, i) => (
               <PackResultCard key={card.id} card={card} index={i} />
@@ -950,6 +1126,7 @@ export function PackOpening({
             All results · {packs.length} packs ·{" "}
             {openedSkin?.label ?? variant?.name}
           </h2>
+          {completedSession && <OpeningRecapPanel session={completedSession} />}
           {(() => {
             const best = packs
               .flatMap((pack, i) =>
@@ -975,6 +1152,9 @@ export function PackOpening({
             <section key={i} className="w-full max-w-4xl space-y-2">
               <h3 className="text-sm font-semibold text-muted-foreground">
                 Pack {i + 1}
+                {packClasses[i]?.id !== "standard"
+                  ? ` · ${packClasses[i]?.label}`
+                  : ""}
               </h3>
               <div className="flex flex-wrap gap-3">
                 {pack.map((card, j) => (
@@ -1074,6 +1254,139 @@ export function PackOpening({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function OpeningRecapPanel({ session }: { session: PackOpeningPullSession }) {
+  const [shareStatus, setShareStatus] = useState("");
+  const eventPacks = (session.packClasses ?? []).filter(
+    (packClass) => packClass.id !== "standard",
+  );
+  const rarestEvent = rarestPackClass(eventPacks);
+  const recap = session.recap;
+
+  const shareRecap = async () => {
+    if (!rarestEvent) return;
+    const bestPull = session.packs
+      .flat()
+      .reduce<
+        PackOpeningPull | undefined
+      >((best, pull) => (!best || tierRank(pull.tier) > tierRank(best.tier) ? pull : best), undefined);
+    const text = [
+      `I found a ${rarestEvent.label} opening ${session.packLabel}!`,
+      bestPull ? `Best pull: ${bestPull.name} (${bestPull.rarity}).` : "",
+      recap
+        ? `${recap.progress.totalPacks} packs opened in the TCGer minigame.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Rare pack recap", text });
+        setShareStatus("Shared");
+      } else {
+        await navigator.clipboard.writeText(text);
+        setShareStatus("Copied");
+      }
+    } catch {
+      setShareStatus("");
+    }
+  };
+
+  if (!recap && eventPacks.length === 0) return null;
+  return (
+    <section
+      className={cn(
+        "w-full max-w-4xl rounded-2xl border p-4 shadow-lg",
+        rarestEvent?.id === "rare-pack"
+          ? "border-amber-300/70 bg-gradient-to-br from-amber-100/90 via-background to-fuchsia-100/70 dark:from-amber-950/70 dark:to-fuchsia-950/50"
+          : rarestEvent
+            ? "border-violet-300/60 bg-gradient-to-br from-violet-100/80 via-background to-sky-100/60 dark:from-violet-950/60 dark:to-sky-950/40"
+            : "border-border bg-background/85",
+      )}
+      aria-label="Opening minigame recap"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          {rarestEvent ? (
+            <>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+                Rare pack event
+              </p>
+              <h3 className="mt-1 text-xl font-heading font-bold">
+                {rarestEvent.label}
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {eventPacks.length > 1
+                  ? `${eventPacks.length} special packs in this opening · `
+                  : ""}
+                {rarestEvent.description}
+              </p>
+            </>
+          ) : (
+            <h3 className="font-heading text-lg font-bold">Opening progress</h3>
+          )}
+        </div>
+        {rarestEvent && (
+          <button
+            type="button"
+            onClick={() => void shareRecap()}
+            className="pointer-events-auto min-h-10 rounded-full border border-border bg-background/80 px-4 py-2 text-xs font-semibold shadow-sm transition hover:bg-muted"
+          >
+            {shareStatus || "Share recap"}
+          </button>
+        )}
+      </div>
+      {recap && (
+        <>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+            <ProgressStat
+              label="Packs opened"
+              value={recap.progress.totalPacks}
+            />
+            <ProgressStat
+              label="Set found"
+              value={`${recap.progress.uniqueCards}/${recap.progress.possibleCards}`}
+            />
+            <ProgressStat label="New cards" value={`+${recap.newCards}`} />
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-sky-500 via-violet-500 to-amber-400"
+              style={{ width: `${recap.progress.completionPercentage}%` }}
+            />
+          </div>
+          <p className="mt-1 text-right text-[11px] font-semibold text-muted-foreground">
+            {recap.progress.completionPercentage}% minigame set complete
+          </p>
+          {recap.unlockedAchievements.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {recap.unlockedAchievements.map((achievement) => (
+                <span
+                  key={achievement.id}
+                  title={achievement.description}
+                  className="rounded-full border border-amber-400/45 bg-amber-300/15 px-3 py-1 text-xs font-bold text-amber-800 dark:text-amber-200"
+                >
+                  Achievement · {achievement.title}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function ProgressStat({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-xl bg-background/65 px-2 py-2.5">
+      <p className="text-base font-bold sm:text-lg">{value}</p>
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground sm:text-xs">
+        {label}
+      </p>
     </div>
   );
 }

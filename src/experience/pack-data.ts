@@ -37,19 +37,19 @@ export const PACK_ODDS_REFERENCES: Record<string, PackOddsReference> = {
     title: "Evolving Skies community pull data",
     url: "https://www.reddit.com/r/PokemonTCG/comments/paitho/evolving_skies_pull_data_from_10000_packs_opened/",
     sampleSize: 11_664,
-    note: "Simplified rarity tiers informed by community openings; not official factory odds.",
+    note: "Simplified card tiers informed by community openings. Pack events use the minigame's configurable 96% Normal, 3% Semi-God, and 1% God table; neither model is an official factory rate.",
   },
   base1: {
     title: "Pokémon Trading Card Sequences",
     url: "https://www.cs.sjsu.edu/~stamp/cv/papers/pokemon.pdf",
     sampleSize: 153,
-    note: "Historical Base Set pack structure and one-in-three holo observation; not official factory odds.",
+    note: "Historical Base Set pack structure and one-in-three holo observation; not official factory odds. This older set supports Normal packs only.",
   },
   me5: {
     title: "Pitch Black pull rates — TCG Talk",
     url: "https://tcgtalk.com/guides/pitch-black-pull-rates",
     sampleSize: 753,
-    note: "Observed rarity frequencies normalized to 100%; low-volume chase tiers are estimates, not official factory odds.",
+    note: "Observed card rarity frequencies normalized to 100%. Pack events use the minigame's configurable 96% Normal, 3% Semi-God, and 1% God table; neither model is an official factory rate.",
   },
 };
 

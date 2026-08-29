@@ -21,11 +21,48 @@ export interface PackOpeningPull {
   imageUrlSmall: string;
 }
 
+export type PackOpeningPackClassID = "standard" | "hit-heavy" | "rare-pack";
+
+export interface PackOpeningPackClassResult {
+  id: PackOpeningPackClassID;
+  /** Set-specific presentation name, such as Semi-God Pack. */
+  label: string;
+  probability: number;
+  description: string;
+}
+
+export interface PackOpeningAchievement {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export interface PackOpeningProgressSnapshot {
+  totalPacks: number;
+  setPacks: number;
+  uniqueCards: number;
+  possibleCards: number;
+  completionPercentage: number;
+  standardPacks: number;
+  hitHeavyPacks: number;
+  rarePacks: number;
+}
+
+export interface PackOpeningRecap {
+  newCards: number;
+  progress: PackOpeningProgressSnapshot;
+  unlockedAchievements: PackOpeningAchievement[];
+}
+
 export interface PackOpeningPullSession {
   id: string;
   packLabel: string;
   openedAt: string;
   packs: PackOpeningPull[][];
+  /** One classification per pack, rolled before its wrapper is torn. */
+  packClasses?: PackOpeningPackClassResult[];
+  /** Persistent minigame progress recorded when the opening completes. */
+  recap?: PackOpeningRecap;
 }
 
 export interface PackOpeningOddsReference {
