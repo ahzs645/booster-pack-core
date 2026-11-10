@@ -1125,7 +1125,7 @@ export function PackOpening({
         </ul>
       )}
 
-      {!nativeControls && openingMode === "burst" && (
+      {!nativeControls && openingMode === "burst" && canvasVisible && (
         <button
           type="button"
           onClick={() => changeSoundMuted(!soundMuted)}
