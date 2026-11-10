@@ -15,9 +15,6 @@ import * as THREE from "three";
 
 import {
   BODY_PATCH,
-  FLOW_BANDS,
-  makeFlowMaterial,
-  makeFlowUniforms,
   makeLipMaterial,
   makePeelUniforms,
   makeStripPatch,
@@ -51,7 +48,6 @@ import { openingPackBaseY, openingPackScale } from "./pack-scene-layout";
 import { paintVariantSheet } from "./pack-sheet";
 import {
   buildCutSet,
-  CUT_MIN,
   seamRibbonGeometry,
   TEAR_Y,
 } from "./pack-tear";
@@ -92,7 +88,16 @@ const BURST_TEAR_Y = TEAR_Y + PACK_H * 0.055;
 const INSIDE_SCALE = 0.94;
 
 const between = (a: number, b: number) => a + Math.random() * (b - a);
-const BIT_COLOURS = [...FLOW_BANDS, "#ffffff"].map(
+const BIT_COLOURS = [
+  "#ff4f7a",
+  "#ff9a48",
+  "#ffd85a",
+  "#58dba6",
+  "#58b6ff",
+  "#9478ff",
+  "#ff6bd0",
+  "#ffffff",
+].map(
   (hex) => new THREE.Color(hex),
 );
 
@@ -165,7 +170,6 @@ function makeSim() {
       rz: spring(0.7, 0.28),
     },
     squeeze: spring(0.3, 0.45),
-    glow: spring(0.5, 0),
     tear: {
       p: spring(0.1, 0),
       lift: spring(0.28, 0.35),
@@ -270,14 +274,6 @@ export function PackBurstExperience({
   const peel = useMemo(() => makePeelUniforms(), []);
   const stripPatch = useMemo(() => makeStripPatch(peel), [peel]);
   const lipMaterial = useMemo(() => makeLipMaterial(peel), [peel]);
-  const flow = useMemo(() => makeFlowUniforms(), []);
-  const flowMaterial = useMemo(() => makeFlowMaterial(flow), [flow]);
-  const flowGeometry = useMemo(() => {
-    // Wide and tall enough to run off the top of any screen from the opening.
-    const geometry = new THREE.PlaneGeometry(40, 22);
-    geometry.translate(0, CUT_MIN - 0.4 + 11, 0);
-    return geometry;
-  }, []);
   const holoMaterials = useMemo(
     () => cards.map((card) => makeHoloMaterial(holoIntensityFor(card))),
     [cards],
@@ -285,11 +281,9 @@ export function PackBurstExperience({
   useEffect(
     () => () => {
       lipMaterial.dispose();
-      flowMaterial.dispose();
-      flowGeometry.dispose();
       normalTex.dispose();
     },
-    [flowGeometry, flowMaterial, lipMaterial, normalTex],
+    [lipMaterial, normalTex],
   );
   useEffect(
     () => () => holoMaterials.forEach((material) => material.dispose()),
@@ -357,7 +351,6 @@ export function PackBurstExperience({
 
   const packRef = useRef<THREE.Group>(null);
   const stripRef = useRef<THREE.Group>(null);
-  const flowRef = useRef<THREE.Group>(null);
   const stackRef = useRef<THREE.Group>(null);
   const cardRefs = useRef<(THREE.Group | null)[]>([]);
   const cardsReadyRef = useRef(false);
@@ -579,7 +572,7 @@ export function PackBurstExperience({
     const dt = Math.min(rawDelta, 0.05) * controls.current.timeScale;
     sim.t += dt;
     const t = sim.t;
-    const { P, tear, squeeze, glow } = sim;
+    const { P, tear, squeeze } = sim;
     const packGroup = packRef.current;
     const pointer = state.pointer;
     const audio = sound.current;
@@ -641,7 +634,6 @@ export function PackBurstExperience({
       P.ry,
       P.rz,
       squeeze,
-      glow,
       tear.p,
       tear.lift,
       tear.pitch,
@@ -783,7 +775,7 @@ export function PackBurstExperience({
     peel.uLift.value = tear.lift.x + flutter;
     peel.uPitch.value = tear.pitch.x + flutter * 1.5;
 
-    /* ------------------------- pack, strip and flow ------------------------ */
+    /* ----------------------------- pack and strip --------------------------- */
     if (sim.stage === "open" && !sim.fall && !reduced && t - sim.openedAt > 0.02) {
       sim.fall = { y: 0, v: 15 * packScale };
     }
@@ -832,45 +824,6 @@ export function PackBurstExperience({
     }
 
     const since = t - sim.openedAt;
-    const pouring = sim.stage === "idle" ? tear.p.x > 0 : since < 0.9;
-    glow.to = pouring && !reduced ? 1 : 0;
-    const flowGroup = flowRef.current;
-    if (flowGroup && packGroup) {
-      flowGroup.visible = glow.x > 0.004;
-      if (!sim.fall) {
-        // The jet rides with the pack until the pack drops…
-        flowGroup.position.copy(packGroup.position);
-        flowGroup.quaternion.copy(packGroup.quaternion);
-        flowGroup.scale.copy(packGroup.scale);
-      } else {
-        // …then it stands straight up, however the pack was leaning.
-        scratch.euler.setFromQuaternion(flowGroup.quaternion);
-        const settle = Math.exp(-dt / 0.05);
-        scratch.euler.x *= settle;
-        scratch.euler.z *= settle;
-        flowGroup.quaternion.setFromEuler(scratch.euler);
-      }
-      const open = sim.stage === "idle" ? 0 : 1;
-      const mouth = line.lowest - 0.12;
-      const top =
-        (viewport.height / 2 - flowGroup.position.y) / packScale - mouth;
-      flow.uTime.value = t;
-      flow.uGlow.value = clamp(glow.x, 0, 1);
-      flow.uTip.value = peel.uTip.value;
-      flow.uDir.value = localDir;
-      flow.uOpen.value = THREE.MathUtils.damp(flow.uOpen.value, open, 14, dt);
-      flow.uMouth.value = mouth;
-      flow.uFocus.value = 1.9;
-      flow.uHalf.value = PACK_W * 0.46;
-      // Long enough for the outermost ribbon to leave the top of the screen.
-      flow.uReach.value = (top + 1.2) * 1.55;
-      // Once the pack is open the tail lets go and follows the rest up.
-      flow.uTail.value = open
-        ? flow.uReach.value * 1.15 * clamp((since - 0.35) / 0.55, 0, 1) ** 2
-        : 0;
-      flow.uCarry.value = open ? (1.6 * since * since) / (since + 0.25) : 0;
-    }
-
     /* --------------------------------- cards -------------------------------- */
     if (stackRef.current) stackRef.current.visible = sim.stage !== "idle";
     const stageCentreY =
@@ -1150,16 +1103,6 @@ export function PackBurstExperience({
           onPointerDown={noop}
         />
       </Suspense>
-
-      {/* light pouring out of the opening, hidden by the wrapper where it is whole */}
-      <group ref={flowRef} visible={false}>
-        <mesh
-          geometry={flowGeometry}
-          material={flowMaterial}
-          renderOrder={4}
-          frustumCulled={false}
-        />
-      </group>
 
       <group ref={packRef} position={[0, packBaseY, 0]} scale={packScale}>
         <mesh geometry={bodyGeometry} renderOrder={5}>

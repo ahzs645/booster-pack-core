@@ -83,7 +83,7 @@ whichever is selected, so no host has to special-case it.
 ```
 src/experience/
   pack-burst-math.ts     springs, the rolled tear line, the unwind path, the table layout — no Three, no DOM
-  pack-burst-effects.ts  the peel vertex patch, the torn metal edge, the fan of light
+  pack-burst-effects.ts  the peel vertex patch and the torn metal edge
   pack-burst-sound.ts    every sound, synthesised with Web Audio
   pack-burst-scene.tsx   the scene: one simulation from first touch to cards on the table
 ```
