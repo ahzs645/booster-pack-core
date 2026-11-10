@@ -21,6 +21,7 @@ src/
   uvFaces.ts     UV triangles, region classification, shell count
   splitMesh.ts   cuts the wrapper along a tear line
   manifest.ts    asset loading, re-anchored to whatever base path the app deploys under
+  experience/    the pack-opening experience itself: carousel, tear, reveal, results
 assets/pack/     the mesh, card back, and an empty local cover manifest
 scripts/
   sync-assets.mjs   copy assets into a consuming app's public dir
@@ -63,6 +64,68 @@ Do not add raster files under `assets/pack/covers`, `assets/pack/bases`, or
 `assets/pack/decals`, and do not populate those registries in the bundled
 manifest. `npm run verify-assets` enforces both requirements. Generated skins
 remain the offline fallback when the remote manifest is unavailable.
+
+## Opening styles
+
+`PackOpening` has three, chosen with the `setOpeningMode` command or the built-in picker:
+
+| Mode | What happens |
+| --- | --- |
+| `normal` | Draw a tear across the wrapper, then reveal the cards one at a time. |
+| `quick` | No animation: straight to the results. |
+| `burst` | The strip peels with the hand, the deck fires out of the wrapper, unwinds through a ring and lands face up in a row. |
+
+Quick and burst apply to single packs. A bulk opening keeps its one-cut stack and grouped results
+whichever is selected, so no host has to special-case it.
+
+### Burst
+
+```
+src/experience/
+  pack-burst-math.ts     springs, the rolled tear line, the unwind path, the table layout — no Three, no DOM
+  pack-burst-effects.ts  the peel vertex patch, the torn metal edge, the fan of light
+  pack-burst-sound.ts    every sound, synthesised with Web Audio
+  pack-burst-scene.tsx   the scene: one simulation from first touch to cards on the table
+```
+
+It is a separate scene rather than a flag on `PackExperience`, so the classic flow is untouched.
+What makes it feel different is mostly a handful of decisions:
+
+- **Everything is a spring, not a tween.** `Spring(response, bounce)` drives the pack, the strip and
+  every card, stepped at 240 Hz inside the frame. A gesture interrupted half way keeps its velocity,
+  and a slow frame cannot destabilise a stiff spring.
+- **The tear line is rolled, not drawn.** `rollTearLine` gives every pack its own climb, bow, wander
+  and snags before the first touch. The mesh is split along it once, just after the pack appears
+  (25–70 ms), so the gesture itself only moves a uniform — no re-split while the hand is moving.
+- **The strip is bent in its vertex shader.** `splitGeometryByCut` still does the cutting; the strip
+  half then carries each vertex behind the tear tip along a curve whose curvature grows with distance
+  from the tip, so it rolls up instead of hinging like a door. A tear only moves forward: let go
+  before 55% and the strip relaxes where it is, past that it finishes by itself. A press with no drag
+  tears it for you.
+- **Cards land on a path that is a pure function of time.** Once the deck clears the wrapper,
+  `orbitPose` owns each card until it reaches its slot, so every card arrives exactly in place
+  whatever the frame rate. Springs take over again only once it has landed.
+- **Hover is judged against where cards rest, not where they are.** `slotAt` hit-tests the layout, so
+  a card that lifts and tilts under the pointer cannot slide out from under it and flicker, and each
+  visible sliver of an overlapped row is its own target.
+- **Cards are layered by draw order, not depth.** Overlapping cards can tilt freely without cutting
+  through each other; they still write depth, which is what hides the wrapper's back panel behind
+  the deck while it is inside.
+- **`fanLayout` picks the rows.** One row with gaps when there is room, a hand of overlapping cards
+  when there is not, more rows on a tall screen — scored by card size and how much of each card
+  stays visible, for 5-card and 11-card packs alike.
+- **Sound follows the hand.** The tear is a loop held at silence whose level tracks tear speed, so a
+  slow pull is single crackles and a flick is one rip. Everything tonal shares a pentatonic scale.
+  Nothing plays before the first press; `soundMuted` or the `setSoundMuted` command silences it.
+
+The fanned cards are pixels in a canvas, so `PackOpening` mirrors them as a visually hidden list:
+focusing an entry lifts that card (`controls.focusCard`), arrow keys walk the row, and activating one
+emits `inspectRequested` — the same event a click or second tap on a card sends. Under
+`prefers-reduced-motion` the pack opens and the cards are simply placed.
+
+Hosts with native controls need no new plumbing: the phases are the existing ones, `revealedCount`
+equals `totalCards` as soon as the cards land, and `advance` during the reveal moves on to the
+summary. `npm run verify-burst` checks the springs, tear line, layout and unwind under plain Node.
 
 ## Tearing the pack
 

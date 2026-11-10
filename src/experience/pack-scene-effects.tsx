@@ -1,7 +1,7 @@
 "use client";
 
 import { useThree } from "@react-three/fiber";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
@@ -174,6 +174,17 @@ interface FoilMaterialProps {
   dim?: boolean;
   /** Side walls render double-sided so winding never culls them. */
   doubleSide?: boolean;
+  /**
+   * Extends the compiled program — the burst opening bends its tear strip in
+   * the vertex stage. `key` keeps patched and unpatched programs apart in
+   * Three's cache. Pass a stable object: a new one recompiles the program.
+   */
+  patch?: FoilMaterialPatch;
+}
+
+export interface FoilMaterialPatch {
+  key: string;
+  apply: THREE.Material["onBeforeCompile"];
 }
 
 export function FoilMaterial({
@@ -182,10 +193,22 @@ export function FoilMaterial({
   materialRef,
   dim = false,
   doubleSide = false,
+  patch,
 }: FoilMaterialProps) {
+  const patchProps = useMemo(
+    () =>
+      patch
+        ? {
+            onBeforeCompile: patch.apply,
+            customProgramCacheKey: () => patch.key,
+          }
+        : {},
+    [patch],
+  );
   return (
     <meshPhysicalMaterial
       ref={materialRef}
+      {...patchProps}
       side={doubleSide ? THREE.DoubleSide : THREE.FrontSide}
       map={map}
       normalMap={normalMap}

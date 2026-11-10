@@ -77,8 +77,8 @@ export function buildCutSet(
 export function seamRibbonGeometry(
   seam: Float32Array,
   side: 1 | -1,
+  width = 0.06 * (PACK_H / 3.3),
 ): THREE.BufferGeometry {
-  const width = 0.06 * (PACK_H / 3.3);
   const lift = 0.012;
   const vertices: number[] = [];
   const a = new THREE.Vector3();

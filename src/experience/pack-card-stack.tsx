@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { tierRank, type PulledCard } from "./pack-data";
 
 export const CARD_WIDTH = 2.02;
-const CARD_HEIGHT = CARD_WIDTH * (88 / 63);
+export const CARD_HEIGHT = CARD_WIDTH * (88 / 63);
 // Standard trading-card corners are approximately a 3 mm radius on a 63 mm
 // card. Keep this ratio as the single silhouette source for every card layer.
 const CARD_CORNER_RADIUS = CARD_WIDTH * (3 / 63);

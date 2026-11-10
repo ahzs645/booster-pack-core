@@ -26,6 +26,8 @@ import {
   recordOpeningProgress,
   rollPackClass,
 } from "./pack-events";
+import { PackBurstExperience } from "./pack-burst-scene";
+import { createPackSound, type PackSound } from "./pack-burst-sound";
 import { packGeometry } from "./pack-mesh";
 import {
   PackExperience,
@@ -60,7 +62,20 @@ const PHASE_HINTS: Partial<Record<PackPhase, string>> = {
   reveal: "Reveal cards one at a time or show all pulls",
 };
 
+const BURST_HINTS: Partial<Record<PackPhase, string>> = {
+  tear: "Drag across the top to tear it open · or tap the pack",
+  reveal: "Hover or tap a card for a closer look",
+};
+
 const PACK_COUNTS = [1, 5, 10] as const;
+
+const OPENING_MODES: ReadonlyArray<{ id: PackOpeningMode; label: string }> = [
+  { id: "normal", label: "Classic" },
+  { id: "burst", label: "Burst" },
+  { id: "quick", label: "Quick" },
+];
+
+const SOUND_MUTED_KEY = "tcger-pack-sound-muted";
 
 const PACK_CLASS_RANK: Record<PackOpeningPackClassResult["id"], number> = {
   standard: 0,
@@ -172,6 +187,7 @@ export function PackOpening({
   debug = false,
   nativeControls = false,
   completionActionLabel,
+  soundMuted: hostSoundMuted,
   onEvent,
 }: PackOpeningProps = {}) {
   const [phase, setPhase] = useState<PackPhase>("select");
@@ -211,6 +227,11 @@ export function PackOpening({
   const playedOmenIDsRef = useRef(new Set<string>());
   const tornAtRef = useRef(0);
   const openingCompletionTimerRef = useRef<number | undefined>(undefined);
+  const soundRef = useRef<PackSound | null>(null);
+  const [storedSoundMuted, setStoredSoundMuted] = useState(false);
+  const soundMuted = hostSoundMuted ?? storedSoundMuted;
+  // A bulk opening is one cut and a grouped summary in every mode.
+  const burst = openingMode === "burst" && packs.length === 1;
   const selectedOddsReference = useMemo(
     () => packOddsReference(browseSkin.packPool),
     [browseSkin.packPool],
@@ -223,6 +244,45 @@ export function PackOpening({
   useEffect(() => {
     controls.current.reducedMotion = prefersReducedMotion;
   }, [prefersReducedMotion]);
+
+  useEffect(() => {
+    try {
+      setStoredSoundMuted(
+        window.localStorage.getItem(SOUND_MUTED_KEY) === "1",
+      );
+    } catch {
+      // Storage can be unavailable in an embedded web view.
+    }
+  }, []);
+  useEffect(() => {
+    soundRef.current?.setMuted(soundMuted);
+  }, [soundMuted]);
+  useEffect(
+    () => () => {
+      soundRef.current?.dispose();
+      soundRef.current = null;
+    },
+    [],
+  );
+  // Browsers only start audio from a gesture, so the synthesiser is built on
+  // the first press made while the burst opening is selected.
+  const wakeSound = useCallback(() => {
+    if (openingMode !== "burst") return;
+    if (!soundRef.current) {
+      soundRef.current = createPackSound();
+      soundRef.current?.setMuted(soundMuted);
+    }
+    soundRef.current?.resume();
+  }, [openingMode, soundMuted]);
+  const changeSoundMuted = useCallback((muted: boolean) => {
+    setStoredSoundMuted(muted);
+    if (!muted) soundRef.current?.tick();
+    try {
+      window.localStorage.setItem(SOUND_MUTED_KEY, muted ? "1" : "0");
+    } catch {
+      // The choice still holds for this session.
+    }
+  }, []);
 
   const startPacks = useCallback(
     (skin: PackSkin, backwards = false) => {
@@ -321,9 +381,11 @@ export function PackOpening({
 
   const handleTorn = useCallback(() => {
     tornAtRef.current = performance.now();
-    onEvent?.({ type: "haptic", style: "impact" });
+    // The burst scene reports its own impact at the moment the strip lets go,
+    // which may be a beat after a button asked for the pack to be opened.
+    if (!burst) onEvent?.({ type: "haptic", style: "impact" });
     setPhase("opening");
-  }, [onEvent]);
+  }, [burst, onEvent]);
   // Multi-pack opens are one ritual followed by a grouped summary. Requiring
   // five or ten separate tears and dozens of card swipes makes bulk opening
   // feel like a queue instead of a payoff.
@@ -331,6 +393,11 @@ export function PackOpening({
     const finish = () => {
       if (openingMode === "quick" || packs.length > 1) {
         setPhase("final");
+      } else if (burst) {
+        // Every card is already face up on the table.
+        setPhase("reveal");
+        setRevealedCount(packs[0]?.length ?? 0);
+        setCurrentCardFaceUp(true);
       } else {
         setPhase("reveal");
         setRevealedCount(packBackwards ? 0 : 1);
@@ -348,7 +415,7 @@ export function PackOpening({
     } else {
       finish();
     }
-  }, [openingMode, packBackwards, packClasses, packs.length]);
+  }, [burst, openingMode, packBackwards, packClasses, packs]);
   const handleReveal = useCallback(
     (count: number) => setRevealedCount(count),
     [],
@@ -374,6 +441,20 @@ export function PackOpening({
     onEvent?.({ type: "haptic", style: "selection" });
     setFlashKey((k) => k + 1);
   }, [onEvent]);
+  const handleHaptic = useCallback(
+    (style: "selection" | "impact" | "success") =>
+      onEvent?.({ type: "haptic", style }),
+    [onEvent],
+  );
+  const handleInspect = useCallback(
+    (index: number) => {
+      const card = packs[packIndex]?.[index];
+      if (card) {
+        onEvent?.({ type: "inspectRequested", pull: pullForSession(card) });
+      }
+    },
+    [onEvent, packIndex, packs],
+  );
 
   // The skin decides the sheet; a variant still comes along for the accent
   // colours the tear glow and charge-up are tinted with.
@@ -610,6 +691,7 @@ export function PackOpening({
           break;
         case "advance":
           if (phase === "tear") handleTorn();
+          else if (phase === "reveal" && burst) handleAllRevealed();
           else if (phase === "reveal") controls.current.revealNext?.();
           break;
         case "showAll":
@@ -619,6 +701,9 @@ export function PackOpening({
           break;
         case "savePulls":
           requestSave();
+          break;
+        case "setSoundMuted":
+          changeSoundMuted(command.muted);
           break;
         case "uploadArtwork": {
           if (!layout) break;
@@ -650,6 +735,8 @@ export function PackOpening({
   }, [
     backToSelect,
     browseSkin,
+    burst,
+    changeSoundMuted,
     handleAllRevealed,
     handleTorn,
     layout,
@@ -725,6 +812,8 @@ export function PackOpening({
     <div
       ref={experienceRef}
       tabIndex={-1}
+      onPointerDownCapture={wakeSound}
+      onKeyDownCapture={wakeSound}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         const target = event.target as HTMLElement;
@@ -787,6 +876,24 @@ export function PackOpening({
                 controls={controls}
                 packCount={packCount}
                 onSelect={(backwards) => startPacks(browseSkin, backwards)}
+              />
+            ) : currentPack && variant && burst ? (
+              <PackBurstExperience
+                assetBase={assetBase}
+                key={`burst-${packIndex}-${remountKey}`}
+                cards={currentPack}
+                variant={variant}
+                sheet={openingSheet}
+                backwards={packBackwards}
+                nativeLayout={nativeControls}
+                phase={phase}
+                controls={controls}
+                sound={soundRef}
+                onTorn={handleTorn}
+                onOpened={handleOpened}
+                onFlash={handleFlash}
+                onHaptic={handleHaptic}
+                onInspect={handleInspect}
               />
             ) : currentPack && variant ? (
               <PackExperience
@@ -888,18 +995,22 @@ export function PackOpening({
         )}
 
       {/* phase hint */}
-      {!nativeControls && PHASE_HINTS[phase] && (
+      {!nativeControls && (burst ? BURST_HINTS[phase] : PHASE_HINTS[phase]) && (
         <p
           className={cn(
             "pointer-events-none absolute left-1/2 z-10 w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-border bg-background/85 px-3 py-1.5 text-center text-xs font-medium text-muted-foreground shadow-sm backdrop-blur sm:text-sm",
             phase === "select"
-              ? "bottom-[9.25rem] sm:bottom-56"
+              ? packCount === 1
+                ? "bottom-[12rem] sm:bottom-[16.75rem]"
+                : "bottom-[9.25rem] sm:bottom-56"
               : phase === "tear" || phase === "reveal"
                 ? "bottom-24"
                 : "bottom-3",
           )}
         >
-          {phase === "tear" && packs.length > 1
+          {burst
+            ? BURST_HINTS[phase]
+            : phase === "tear" && packs.length > 1
             ? `Tear once to open all ${packs.length} packs`
             : phase === "reveal" && packBackwards
               ? currentCardFaceUp
@@ -917,10 +1028,14 @@ export function PackOpening({
             onClick={
               phase === "tear"
                 ? handleTorn
-                : () => controls.current.revealNext?.()
+                : burst
+                  ? handleAllRevealed
+                  : () => controls.current.revealNext?.()
             }
             aria-label={
-              phase === "reveal"
+              burst
+                ? undefined
+                : phase === "reveal"
                 ? currentPack && revealedCount >= currentPack.length
                   ? "Finish reveal"
                   : packBackwards
@@ -933,9 +1048,11 @@ export function PackOpening({
             className="min-h-11 rounded-full border border-border bg-background/90 px-4 py-2.5 text-sm font-semibold shadow-sm backdrop-blur transition hover:bg-muted"
           >
             {phase === "tear"
-              ? prefersReducedMotion
+              ? prefersReducedMotion || burst
                 ? "Open pack"
                 : "Skip tear animation"
+              : burst
+                ? "See results"
               : currentPack && revealedCount >= currentPack.length
                 ? "Finish reveal"
                 : packBackwards
@@ -944,7 +1061,7 @@ export function PackOpening({
                     : "Flip card"
                   : "Reveal next"}
           </button>
-          {phase === "reveal" && (
+          {phase === "reveal" && !burst && (
             <button
               type="button"
               onClick={handleAllRevealed}
@@ -958,10 +1075,84 @@ export function PackOpening({
       )}
 
       <p className="sr-only" role="status" aria-live="polite">
-        {phase === "reveal" && currentPack
-          ? `${revealedCount} of ${currentPack.length} cards revealed`
-          : (PHASE_HINTS[phase] ?? `Pack opening phase: ${phase}`)}
+        {phase === "reveal" && currentPack && burst
+          ? `Pack opened: ${currentPack.map((card) => card.name).join(", ")}.`
+          : phase === "reveal" && currentPack
+            ? `${revealedCount} of ${currentPack.length} cards revealed`
+            : ((burst ? BURST_HINTS[phase] : undefined) ??
+              PHASE_HINTS[phase] ??
+              `Pack opening phase: ${phase}`)}
       </p>
+
+      {/* The fanned cards are pixels in a canvas, so the keyboard and screen
+          readers get them as a list: focusing an entry lifts that card just
+          as hovering it does, and activating it asks the host to inspect it. */}
+      {burst && phase === "reveal" && currentPack && (
+        <ul
+          className="sr-only"
+          aria-label="Cards in this pack"
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            const buttons = [
+              ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                "button",
+              ),
+            ];
+            const at = buttons.indexOf(
+              document.activeElement as HTMLButtonElement,
+            );
+            const next = Math.min(
+              buttons.length - 1,
+              Math.max(0, at + (event.key === "ArrowLeft" ? -1 : 1)),
+            );
+            buttons[next]?.focus();
+            event.preventDefault();
+          }}
+        >
+          {currentPack.map((card, index) => (
+            <li key={card.id}>
+              <button
+                type="button"
+                onFocus={() => controls.current.focusCard?.(index)}
+                onBlur={() => controls.current.focusCard?.(null)}
+                onClick={() => handleInspect(index)}
+              >
+                {card.name}, {card.rarity}, card {index + 1} of{" "}
+                {currentPack.length}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!nativeControls && openingMode === "burst" && (
+        <button
+          type="button"
+          onClick={() => changeSoundMuted(!soundMuted)}
+          aria-label="Mute sound"
+          aria-pressed={soundMuted}
+          className="absolute left-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full border border-border bg-background/80 text-foreground backdrop-blur transition hover:bg-muted"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4z" fill="currentColor" />
+            <g
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            >
+              {soundMuted ? (
+                <path d="M16 9.5l5 5m0-5l-5 5" />
+              ) : (
+                <>
+                  <path d="M15.5 9.2a4 4 0 0 1 0 5.6" />
+                  <path d="M18.2 6.8a7.5 7.5 0 0 1 0 10.4" />
+                </>
+              )}
+            </g>
+          </svg>
+        </button>
+      )}
 
       {/* texture + pack count pickers on select screen */}
       {!nativeControls && phase === "select" && (
@@ -1043,6 +1234,31 @@ export function PackOpening({
               {selectedOddsReference.note}
             </p>
           </details>
+          {packCount === 1 && (
+            <div
+              role="radiogroup"
+              aria-label="Opening style"
+              className="flex justify-center gap-1 rounded-full bg-muted p-1"
+            >
+              {OPENING_MODES.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={openingMode === mode.id}
+                  onClick={() => setOpeningMode(mode.id)}
+                  className={cn(
+                    "min-h-8 rounded-full px-3 py-1 text-xs font-semibold transition",
+                    openingMode === mode.id
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col">
             <div className="flex shrink-0 justify-center gap-1.5 sm:gap-2">
               {PACK_COUNTS.map((n) => (

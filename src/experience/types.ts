@@ -6,7 +6,16 @@ export type PackOpeningPhase =
   | "summary"
   | "final";
 
-export type PackOpeningMode = "normal" | "quick";
+/**
+ * - `normal`: tear the wrapper, then reveal the cards one at a time.
+ * - `quick`: skip the animation and go straight to the results.
+ * - `burst`: the strip peels with the hand, the deck fires out of the wrapper,
+ *   unwinds through a ring and lands face up in a row to be inspected.
+ *
+ * Quick and burst apply to single packs; a bulk opening keeps its one-cut
+ * ritual and grouped results whichever is selected.
+ */
+export type PackOpeningMode = "normal" | "quick" | "burst";
 
 export interface PackOpeningPull {
   cardId: string;
@@ -117,6 +126,7 @@ export type PackOpeningNativeCommand =
   | { type: "advance" }
   | { type: "showAll" }
   | { type: "savePulls" }
+  | { type: "setSoundMuted"; muted: boolean }
   | { type: "uploadArtwork"; dataURL: string; label: string };
 
 export type PackOpeningEvent =
@@ -139,6 +149,11 @@ export interface PackOpeningProps {
   nativeControls?: boolean;
   /** Adds a host-owned persistence action to completed opening results. */
   completionActionLabel?: string;
+  /**
+   * Silences the burst opening's synthesised sound. Leave undefined to let the
+   * experience remember the user's own choice.
+   */
+  soundMuted?: boolean;
   /** Receives lifecycle and tactile events from the shared experience. */
   onEvent?: (event: PackOpeningEvent) => void;
 }
